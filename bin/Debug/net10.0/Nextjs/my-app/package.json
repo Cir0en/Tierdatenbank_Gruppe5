@@ -10,6 +10,8 @@
     "export": "next build && next export"
   },
   "dependencies": {
+    "@maptiler/marker-layout": "^2.0.1",
+    "@maptiler/sdk": "^4.0.1",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
