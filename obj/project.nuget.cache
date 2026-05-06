@@ -1,18 +1,18 @@
 {
   "version": 2,
-  "dgSpecHash": "YeRriODpwow=",
+  "dgSpecHash": "RZosqetUykk=",
   "success": true,
-  "projectFilePath": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+  "projectFilePath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.6\\microsoft.aspnetcore.openapi.10.0.6.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.entityframeworkcore\\10.0.7\\microsoft.entityframeworkcore.10.0.7.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.entityframeworkcore.abstractions\\10.0.7\\microsoft.entityframeworkcore.abstractions.10.0.7.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.entityframeworkcore.analyzers\\10.0.7\\microsoft.entityframeworkcore.analyzers.10.0.7.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.entityframeworkcore.inmemory\\10.0.7\\microsoft.entityframeworkcore.inmemory.10.0.7.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\nextjsstatichosting.aspnetcore\\0.9.3-preview\\nextjsstatichosting.aspnetcore.0.9.3-preview.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\system.io.hashing\\7.0.0\\system.io.hashing.7.0.0.nupkg.sha512",
-    "C:\\Users\\Erkan\\.nuget\\packages\\yarp.reverseproxy\\2.1.0\\yarp.reverseproxy.2.1.0.nupkg.sha512"
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.6\\microsoft.aspnetcore.openapi.10.0.6.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.entityframeworkcore\\10.0.7\\microsoft.entityframeworkcore.10.0.7.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.entityframeworkcore.abstractions\\10.0.7\\microsoft.entityframeworkcore.abstractions.10.0.7.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.entityframeworkcore.analyzers\\10.0.7\\microsoft.entityframeworkcore.analyzers.10.0.7.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.entityframeworkcore.inmemory\\10.0.7\\microsoft.entityframeworkcore.inmemory.10.0.7.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\nextjsstatichosting.aspnetcore\\0.9.3-preview\\nextjsstatichosting.aspnetcore.0.9.3-preview.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\system.io.hashing\\7.0.0\\system.io.hashing.7.0.0.nupkg.sha512",
+    "C:\\Users\\lukas\\.nuget\\packages\\yarp.reverseproxy\\2.1.0\\yarp.reverseproxy.2.1.0.nupkg.sha512"
   ],
   "logs": []
 }
