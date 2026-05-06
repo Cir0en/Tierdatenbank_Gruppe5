@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank\\Tierdatenbank\\TodoApi.csproj": {}
+    "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj": {}
   },
   "projects": {
-    "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank\\Tierdatenbank\\TodoApi.csproj": {
+    "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank\\Tierdatenbank\\TodoApi.csproj",
+        "projectUniqueName": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
         "projectName": "TodoApi",
-        "projectPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank\\Tierdatenbank\\TodoApi.csproj",
-        "packagesPath": "C:\\Users\\lukas\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank\\Tierdatenbank\\obj\\",
+        "projectPath": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+        "packagesPath": "C:\\Users\\Erkan\\.nuget\\packages\\",
+        "outputPath": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\lukas\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\Erkan\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
@@ -76,7 +76,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.202/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.AspNetCore": "(,10.0.32767]",
             "Microsoft.AspNetCore.Antiforgery": "(,10.0.32767]",
