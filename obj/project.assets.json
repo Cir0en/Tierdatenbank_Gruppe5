@@ -314,19 +314,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Erkan\\.nuget\\packages\\": {}
+    "C:\\Users\\lukas\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+      "projectUniqueName": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
       "projectName": "TodoApi",
-      "projectPath": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
-      "packagesPath": "C:\\Users\\Erkan\\.nuget\\packages\\",
-      "outputPath": "C:\\Universität\\Master\\Implementierung\\Tierdatenbank_Gruppe5\\obj\\",
+      "projectPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+      "packagesPath": "C:\\Users\\lukas\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\Erkan\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\lukas\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
@@ -388,7 +388,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.202/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.AspNetCore": "(,10.0.32767]",
           "Microsoft.AspNetCore.Antiforgery": "(,10.0.32767]",
