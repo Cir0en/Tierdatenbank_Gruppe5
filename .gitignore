@@ -364,3 +364,5 @@ FodyWeavers.xsd
 
 # Testdaten sind vertraulich!
 /Daten/
+obj/Debug/net10.0/TodoApi.AssemblyInfo.cs
+obj/Debug/net10.0/TodoApi.AssemblyInfoInputs.cache
