@@ -77,22 +77,31 @@ export default function DashboardPage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-          --bg:         #0c0f0a;
-          --bg-surface: rgba(16,20,14,0.94);
-          --bg-card:    rgba(18,23,15,0.97);
-          --green:      rgba(74,110,61,1);
-          --green-dim:  rgba(74,110,61,0.25);
-          --green-glow: rgba(74,110,61,0.08);
-          --text-hi:    #d8e8cc;
-          --text-mid:   rgba(160,190,145,0.75);
-          --text-lo:    rgba(120,150,100,0.5);
-          --amber:      rgba(200,150,60,0.85);
-          --red:        rgba(180,60,60,0.85);
-          --border:     rgba(74,110,61,0.18);
-          --sidebar-w:  220px;
-          --top-h:      52px;
-          --ff-serif:   'Cormorant Garamond', serif;
-          --ff-mono:    'DM Mono', monospace;
+          -/* Backgrounds: Sauber und hell */
+          --bg:          #ffffff;           /* Reinweiß für den Hauptinhalt */
+          --bg-surface:  #f8f9fa;           /* Google-Grau für Sidebars/Hintergründe */
+          --bg-card:     #ffffff;           /* Karten heben sich durch Schatten ab, nicht durch Farbe */
+
+          /* Brand Colors: Das typische Google-Blau */
+          --primary:      #1a73e8;          /* Das klassische Link- und Button-Blau */
+          --primary-dim:  rgba(26, 115, 232, 0.1);
+          --primary-glow: rgba(26, 115, 232, 0.04);
+
+          /* Text: Hoher Kontrast für Lesbarkeit */
+          --text-hi:     #202124;           /* Fast Schwarz für Headlines */
+          --text-mid:    #5f6368;           /* Dunkelgrau für Fließtext */
+          --text-lo:     #70757a;           /* Mittleres Grau für Metadaten/Captions */
+
+          /* Status-Farben: Klar und kräftig */
+          --amber:       #f9ab00;           /* Google-Gelb/Orange */
+          --red:         #d93025;           /* Google/YouTube-Rot */
+          --border:      #dadce0;           /* Subtile Trennlinien */
+
+          /* Layout & Typo */
+          --sidebar-w:   240px;
+          --top-h:       64px;
+          --ff-sans:     'Inter', 'Roboto', system-ui, sans-serif;
+          --ff-mono:     'Roboto Mono', monospace;
         }
 
         html, body { height: 100%; background: var(--bg); color: var(--text-hi); font-family: var(--ff-mono); font-size: 13px; overflow: hidden; }
