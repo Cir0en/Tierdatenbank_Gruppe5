@@ -126,3 +126,46 @@ C:\Users\lukas\Desktop\Uni\ImplementierungVonAnwendungssystemen\Tierdatenbank_Gr
 C:\Users\lukas\Desktop\Uni\ImplementierungVonAnwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.pdb
 C:\Users\lukas\Desktop\Uni\ImplementierungVonAnwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.genruntimeconfig.cache
 C:\Users\lukas\Desktop\Uni\ImplementierungVonAnwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\ref\TodoApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\appsettings.Development.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\appsettings.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Nextjs\my-app\package.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Nextjs\my-app\tsconfig.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.staticwebassets.endpoints.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Nextjs\my-app\package-lock.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.exe
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.deps.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.runtimeconfig.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\TodoApi.pdb
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Microsoft.AspNetCore.OpenApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Microsoft.EntityFrameworkCore.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Microsoft.EntityFrameworkCore.Abstractions.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Microsoft.EntityFrameworkCore.InMemory.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Microsoft.OpenApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\NextjsStaticHosting.AspNetCore.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\System.IO.Hashing.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\bin\Debug\net10.0\Yarp.ReverseProxy.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.csproj.AssemblyReference.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\rpswa.dswa.cache.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.GeneratedMSBuildEditorConfig.editorconfig
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.AssemblyInfoInputs.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.AssemblyInfo.cs
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.csproj.CoreCompileInputs.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.MvcApplicationPartsAssemblyInfo.cs
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.MvcApplicationPartsAssemblyInfo.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.sourcelink.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\rjimswa.dswa.cache.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\rjsmrazor.dswa.cache.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\rjsmcshtml.dswa.cache.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\scopedcss\bundle\TodoApi.styles.css
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\staticwebassets.build.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\staticwebassets.build.json.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\staticwebassets.development.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\staticwebassets.build.endpoints.json
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\swae.build.ex.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.csproj.Up2Date
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\refint\TodoApi.dll
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.pdb
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\TodoApi.genruntimeconfig.cache
+D:\Programmierung Projekte\Implementierung von Anwendungssystemen\Tierdatenbank_Gruppe5\obj\Debug\net10.0\ref\TodoApi.dll

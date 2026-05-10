@@ -314,24 +314,31 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\lukas\\.nuget\\packages\\": {}
+    "C:\\Users\\Cedric\\.nuget\\packages\\": {},
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+      "projectUniqueName": "D:\\Programmierung Projekte\\Implementierung von Anwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
       "projectName": "TodoApi",
-      "projectPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
-      "packagesPath": "C:\\Users\\lukas\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\lukas\\Desktop\\Uni\\ImplementierungVonAnwendungssystemen\\Tierdatenbank_Gruppe5\\obj\\",
+      "projectPath": "D:\\Programmierung Projekte\\Implementierung von Anwendungssystemen\\Tierdatenbank_Gruppe5\\TodoApi.csproj",
+      "packagesPath": "C:\\Users\\Cedric\\.nuget\\packages\\",
+      "outputPath": "D:\\Programmierung Projekte\\Implementierung von Anwendungssystemen\\Tierdatenbank_Gruppe5\\obj\\",
       "projectStyle": "PackageReference",
+      "fallbackFolders": [
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+      ],
       "configFilePaths": [
-        "C:\\Users\\lukas\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\Cedric\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
       ],
       "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
