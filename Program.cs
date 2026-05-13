@@ -1,6 +1,14 @@
 using NextjsStaticHosting.AspNetCore;
+using Microsoft.EntityFrameworkCore;
+using TodoApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Datenbank Konfiguration:
+// User Secret bitte lokal einrichten
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+builder.Services.AddDbContext<NeondbContext>(options => options.UseNpgsql(connectionString));
 
 
 
