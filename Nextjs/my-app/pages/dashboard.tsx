@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import testdata from '../data/tierdaten.json';
+
+
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type NavItem = { id: string; label: string; icon: string; href: string };
 type Specimen = {
   id: string; name: string; taxon: string; fundort: string;
   datum: string; sammlung: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
-};
+}; 
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
 
 // ── Static data (replace with API calls) ──────────────────────────────────
@@ -21,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "taxonomie", label: "Taxonomie",  icon: "⊞", href: "/taxonomie"  },
 ];
 
+/*
 const MOCK_SPECIMENS: Specimen[] = [
   { id: "OBJ-001", name: "Papilio machaon",   taxon: "Lepidoptera",  fundort: "Bayern, DE",    datum: "2026-04-12", sammlung: "Schmetterlings-Kollektion", status: "freigegeben" },
   { id: "OBJ-002", name: "Carabus violaceus",  taxon: "Coleoptera",   fundort: "Sachsen, DE",   datum: "2026-04-18", sammlung: "Käfer-Kollektion",          status: "freigegeben" },
@@ -28,7 +32,10 @@ const MOCK_SPECIMENS: Specimen[] = [
   { id: "OBJ-004", name: "Lacerta agilis",     taxon: "Squamata",     fundort: "Baden-WÜ, DE",  datum: "2026-05-01", sammlung: "Reptilien",                 status: "freigegeben" },
   { id: "OBJ-005", name: "Apis mellifera",     taxon: "Hymenoptera",  fundort: "NRW, DE",       datum: "2026-05-03", sammlung: "Bienen & Wespen",           status: "ausstehend"  },
   { id: "OBJ-006", name: "Rana temporaria",    taxon: "Anura",        fundort: "Brandenburg, DE",datum: "2026-05-07", sammlung: "Amphibien",                status: "freigegeben" },
-];
+]; */
+
+
+const MOCK_SPECIMENS= testdata as Specimen[];
 
 const MOCK_LOANS: Loan[] = [
   { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",   bis: "2026-06-01", status: "aktiv"     },
