@@ -15,6 +15,8 @@ public partial class NeondbContext : DbContext
     {
     }
 
+    public virtual DbSet<CollectItem> CollectItems { get; set; }
+
     public virtual DbSet<Collection> Collections { get; set; }
 
     public virtual DbSet<GeoLocation> GeoLocations { get; set; }
@@ -22,8 +24,6 @@ public partial class NeondbContext : DbContext
     public virtual DbSet<Loan> Loans { get; set; }
 
     public virtual DbSet<Location> Locations { get; set; }
-
-    public virtual DbSet<Object> Objects { get; set; }
 
     public virtual DbSet<ObjectImage> ObjectImages { get; set; }
 
@@ -38,6 +38,50 @@ public partial class NeondbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<CollectItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("objects_pkey");
+
+            entity.ToTable("collect_items");
+
+            entity.HasIndex(e => e.CollectionId, "idx_objects_collection");
+
+            entity.HasIndex(e => e.TaxonomyId, "idx_objects_taxonomy");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CollectionId).HasColumnName("collection_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.FindDate).HasColumnName("find_date");
+            entity.Property(e => e.FindingLocationId).HasColumnName("finding_location_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.StorageInfo).HasColumnName("storage_info");
+            entity.Property(e => e.StorageLocationId).HasColumnName("storage_location_id");
+            entity.Property(e => e.TaxonomyId).HasColumnName("taxonomy_id");
+
+            entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
+                .HasForeignKey(d => d.CollectionId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_objects_collection");
+
+            entity.HasOne(d => d.FindingLocation).WithMany(p => p.CollectItems)
+                .HasForeignKey(d => d.FindingLocationId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("objects_finding_location_id_fkey");
+
+            entity.HasOne(d => d.StorageLocation).WithMany(p => p.CollectItems)
+                .HasForeignKey(d => d.StorageLocationId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("objects_storage_location_id_fkey");
+
+            entity.HasOne(d => d.Taxonomy).WithMany(p => p.CollectItems)
+                .HasForeignKey(d => d.TaxonomyId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("fk_objects_taxonomy");
+        });
+
         modelBuilder.Entity<Collection>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("collections_pkey");
@@ -138,50 +182,6 @@ public partial class NeondbContext : DbContext
                 .HasForeignKey(d => d.ParentId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("fk_locations_parent");
-        });
-
-        modelBuilder.Entity<Object>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("objects_pkey");
-
-            entity.ToTable("objects");
-
-            entity.HasIndex(e => e.CollectionId, "idx_objects_collection");
-
-            entity.HasIndex(e => e.TaxonomyId, "idx_objects_taxonomy");
-
-            entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.CollectionId).HasColumnName("collection_id");
-            entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("now()")
-                .HasColumnName("created_at");
-            entity.Property(e => e.Description).HasColumnName("description");
-            entity.Property(e => e.FindDate).HasColumnName("find_date");
-            entity.Property(e => e.FindingLocationId).HasColumnName("finding_location_id");
-            entity.Property(e => e.Name).HasColumnName("name");
-            entity.Property(e => e.StorageInfo).HasColumnName("storage_info");
-            entity.Property(e => e.StorageLocationId).HasColumnName("storage_location_id");
-            entity.Property(e => e.TaxonomyId).HasColumnName("taxonomy_id");
-
-            entity.HasOne(d => d.Collection).WithMany(p => p.Objects)
-                .HasForeignKey(d => d.CollectionId)
-                .OnDelete(DeleteBehavior.Cascade)
-                .HasConstraintName("fk_objects_collection");
-
-            entity.HasOne(d => d.FindingLocation).WithMany(p => p.Objects)
-                .HasForeignKey(d => d.FindingLocationId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("objects_finding_location_id_fkey");
-
-            entity.HasOne(d => d.StorageLocation).WithMany(p => p.Objects)
-                .HasForeignKey(d => d.StorageLocationId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("objects_storage_location_id_fkey");
-
-            entity.HasOne(d => d.Taxonomy).WithMany(p => p.Objects)
-                .HasForeignKey(d => d.TaxonomyId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("fk_objects_taxonomy");
         });
 
         modelBuilder.Entity<ObjectImage>(entity =>

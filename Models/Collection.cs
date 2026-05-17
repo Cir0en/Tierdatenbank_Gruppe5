@@ -15,7 +15,7 @@ public partial class Collection
 
     public bool? IsPublic { get; set; }
 
-    public virtual ICollection<Object> Objects { get; set; } = new List<Object>();
+    public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
 
     public virtual ICollection<StorageLocation> StorageLocations { get; set; } = new List<StorageLocation>();
 

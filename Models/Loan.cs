@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace TodoApi.Models;
@@ -23,5 +23,5 @@ public partial class Loan
 
     public virtual User? Lender { get; set; }
 
-    public virtual Object? Object { get; set; }
+    public virtual CollectItem? Object { get; set; }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace TodoApi.Models;
@@ -15,9 +15,9 @@ public partial class GeoLocation
 
     public decimal? Longitude { get; set; }
 
-    public virtual ICollection<GeoLocation> InverseParent { get; set; } = new List<GeoLocation>();
+    public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
 
-    public virtual ICollection<Object> Objects { get; set; } = new List<Object>();
+    public virtual ICollection<GeoLocation> InverseParent { get; set; } = new List<GeoLocation>();
 
     public virtual GeoLocation? Parent { get; set; }
 }
