@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace TodoApi.Models;
@@ -15,9 +15,9 @@ public partial class Taxonomy
 
     public bool? IsApproved { get; set; }
 
-    public virtual ICollection<Taxonomy> InverseParent { get; set; } = new List<Taxonomy>();
+    public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
 
-    public virtual ICollection<Object> Objects { get; set; } = new List<Object>();
+    public virtual ICollection<Taxonomy> InverseParent { get; set; } = new List<Taxonomy>();
 
     public virtual Taxonomy? Parent { get; set; }
 }
