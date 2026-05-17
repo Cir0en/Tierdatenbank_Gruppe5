@@ -15,5 +15,5 @@ public partial class ObjectImage
 
     public DateTime? CreatedAt { get; set; }
 
-    public virtual Object? Object { get; set; }
+    public virtual CollectItem? Object { get; set; }
 }

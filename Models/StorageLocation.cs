@@ -15,11 +15,11 @@ public partial class StorageLocation
 
     public string? Description { get; set; }
 
+    public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
+
     public virtual Collection? Collection { get; set; }
 
     public virtual ICollection<StorageLocation> InverseParent { get; set; } = new List<StorageLocation>();
-
-    public virtual ICollection<Object> Objects { get; set; } = new List<Object>();
 
     public virtual StorageLocation? Parent { get; set; }
 }
