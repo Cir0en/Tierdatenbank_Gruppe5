@@ -48,7 +48,7 @@ public partial class NeondbContext : DbContext
 
             entity.HasIndex(e => e.TaxonomyId, "idx_objects_taxonomy");
 
-            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
             entity.Property(e => e.CollectionId).HasColumnName("collection_id");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
