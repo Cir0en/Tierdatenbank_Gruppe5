@@ -13,11 +13,13 @@ public partial class CollectItem
 
     public string? Name { get; set; }
 
-    public DateOnly? FindDate { get; set; }
+    public string? FindDate { get; set; }
 
     public string? Description { get; set; }
 
     public DateTime? CreatedAt { get; set; }
+
+    public string? Status { get; set; }
 
     public string? StorageInfo { get; set; }
 

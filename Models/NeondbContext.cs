@@ -48,7 +48,7 @@ public partial class NeondbContext : DbContext
 
             entity.HasIndex(e => e.TaxonomyId, "idx_objects_taxonomy");
 
-            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
             entity.Property(e => e.CollectionId).HasColumnName("collection_id");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
@@ -60,7 +60,7 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.StorageInfo).HasColumnName("storage_info");
             entity.Property(e => e.StorageLocationId).HasColumnName("storage_location_id");
             entity.Property(e => e.TaxonomyId).HasColumnName("taxonomy_id");
-
+            entity.Property(e => e.Status).HasColumnName("status");
             entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
                 .HasForeignKey(d => d.CollectionId)
                 .OnDelete(DeleteBehavior.Cascade)
