@@ -9,8 +9,8 @@ import testdata from '../data/tierdaten.json';
 // ── Types ──────────────────────────────────────────────────────────────────
 type NavItem = { id: string; label: string; icon: string; href: string };
 type Specimen = {
-  id: string; name: string; taxon: string; fundort: string;
-  datum: string; sammlung: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
+  id: string; name: string; taxon?: string; fundort?: string;
+  datum?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 }; 
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
 
@@ -24,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "taxonomie", label: "Taxonomie",  icon: "⊞", href: "/taxonomie"  },
 ];
 
+// Testtiere zur Darstellung
 /*
 const MOCK_SPECIMENS: Specimen[] = [
   { id: "OBJ-001", name: "Papilio machaon",   taxon: "Lepidoptera",  fundort: "Bayern, DE",    datum: "2026-04-12", sammlung: "Schmetterlings-Kollektion", status: "freigegeben" },
@@ -33,9 +34,18 @@ const MOCK_SPECIMENS: Specimen[] = [
   { id: "OBJ-005", name: "Apis mellifera",     taxon: "Hymenoptera",  fundort: "NRW, DE",       datum: "2026-05-03", sammlung: "Bienen & Wespen",           status: "ausstehend"  },
   { id: "OBJ-006", name: "Rana temporaria",    taxon: "Anura",        fundort: "Brandenburg, DE",datum: "2026-05-07", sammlung: "Amphibien",                status: "freigegeben" },
 ]; */
+// Testiere mit JSON Datei
+//const MOCK_SPECIMENS= testdata as Specimen[];
 
 
-const MOCK_SPECIMENS= testdata as Specimen[];
+
+
+
+
+
+
+
+
 
 const MOCK_LOANS: Loan[] = [
   { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",   bis: "2026-06-01", status: "aktiv"     },
@@ -73,6 +83,25 @@ export default function DashboardPage() {
   const userName = "Prof. Dr. E. Yalcin";
   const userRole = "Moderator";
   const initials = "EY";
+
+  // Testlauf für API-Daten
+   
+  const [MOCK_SPECIMENS, setAnimals] = useState<Specimen[]>([]);
+  // Fetch all animals
+  useEffect(() => {
+    const fetchAnimals = async () => {
+      const response = await fetch('http://localhost:5099/api/animals/dashboard');
+      const data = await response.json();
+      setAnimals(data);
+    };
+    fetchAnimals();
+
+    const interval = setInterval(fetchAnimals, 5000);
+
+    return () => clearInterval(interval); // cleanup
+  }, []);
+
+
 
   const pending   = MOCK_SPECIMENS.filter((s) => s.status === "ausstehend").length;
   const overdue   = MOCK_LOANS.filter((l) => l.status === "überfällig").length;

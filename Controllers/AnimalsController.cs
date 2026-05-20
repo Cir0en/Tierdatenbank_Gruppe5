@@ -33,6 +33,17 @@ namespace TodoApi.Controllers
             return obj;
         }
 
+        [HttpGet("dashboard")]
+        public async Task<ActionResult> GetAnimal()
+        {
+            var items = await _context.CollectItems
+                .Select(c => new { c.Id, c.Name, c.TaxonomyId, c.FindingLocationId, c.FindDate
+                ,
+                c.CollectionId, Status = c.Status ?? "ausstehend" })
+                .ToListAsync();
+            return Ok(items);
+        }
+//FindDate = c.FindDate.HasValue ? c.FindDate.Value.ToDateTime(TimeOnly.MinValue).ToString("yyyy-MM-dd") : null
         [HttpPost]
         public async Task<ActionResult<CollectItem>> CreateAnimal(CollectItem item)
         {
