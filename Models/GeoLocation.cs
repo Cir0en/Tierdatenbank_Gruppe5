@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace TodoApi.Models;
@@ -9,11 +9,15 @@ public partial class GeoLocation
 
     public int? ParentId { get; set; }
 
+    public string? ExternalId { get; set; }
+
     public string Name { get; set; } = null!;
 
     public decimal? Latitude { get; set; }
 
     public decimal? Longitude { get; set; }
+
+    public string? Type { get; set; }
 
     public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
 
