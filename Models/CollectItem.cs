@@ -11,21 +11,19 @@ public partial class CollectItem
 
     public int? TaxonomyId { get; set; }
 
+    public int? FindingLocationId { get; set; }
+
     public string? Name { get; set; }
 
-    public string? FindDate { get; set; }
+    public DateOnly? FindDate { get; set; }
 
     public string? Description { get; set; }
+
+    public string? StorageInfo { get; set; }
 
     public DateTime? CreatedAt { get; set; }
 
     public string? Status { get; set; }
-
-    public string? StorageInfo { get; set; }
-
-    public int? FindingLocationId { get; set; }
-
-    public int? StorageLocationId { get; set; }
 
     public virtual Collection? Collection { get; set; }
 
@@ -34,8 +32,6 @@ public partial class CollectItem
     public virtual ICollection<Loan> Loans { get; set; } = new List<Loan>();
 
     public virtual ICollection<ObjectImage> ObjectImages { get; set; } = new List<ObjectImage>();
-
-    public virtual StorageLocation? StorageLocation { get; set; }
 
     public virtual Taxonomy? Taxonomy { get; set; }
 }

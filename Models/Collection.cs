@@ -17,7 +17,5 @@ public partial class Collection
 
     public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
 
-    public virtual ICollection<StorageLocation> StorageLocations { get; set; } = new List<StorageLocation>();
-
     public virtual User? User { get; set; }
 }

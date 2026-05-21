@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace TodoApi.Models;
@@ -9,6 +9,8 @@ public partial class Taxonomy
 
     public int? ParentId { get; set; }
 
+    public int? CreatedBy { get; set; }
+
     public string Name { get; set; } = null!;
 
     public string? Rank { get; set; }
@@ -16,6 +18,8 @@ public partial class Taxonomy
     public bool? IsApproved { get; set; }
 
     public virtual ICollection<CollectItem> CollectItems { get; set; } = new List<CollectItem>();
+
+    public virtual User? CreatedByNavigation { get; set; }
 
     public virtual ICollection<Taxonomy> InverseParent { get; set; } = new List<Taxonomy>();
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import testdata from '../data/tierdaten.json';
+import { formatDate } from "../utils/date";
 
 
 
@@ -10,7 +11,7 @@ import testdata from '../data/tierdaten.json';
 type NavItem = { id: string; label: string; icon: string; href: string };
 type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
-  datum?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
+  datum?: string; findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 }; 
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
 
@@ -85,8 +86,11 @@ export default function DashboardPage() {
   const initials = "EY";
 
   // Testlauf für API-Daten
-   
+
   const [MOCK_SPECIMENS, setAnimals] = useState<Specimen[]>([]);
+
+
+  
   // Fetch all animals
   useEffect(() => {
     const fetchAnimals = async () => {
@@ -592,7 +596,9 @@ export default function DashboardPage() {
                             <span style={{ fontSize: 9, color: "var(--text-lo)" }}>{s.taxon}</span>
                           </td>
                           <td>{s.fundort}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{s.datum}</td>
+
+                          {/* <td style={{ whiteSpace: "nowrap" }}>{s.datum}</td>*/}
+                          <td style={{ whiteSpace: "nowrap" }}>{formatDate(s.findDate)} </td>
                           <td><StatusPill status={s.status} /></td>
                           <td>
                             <div className="td-actions">
