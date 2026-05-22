@@ -1,0 +1,117 @@
+using System.Net;
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Svix;
+using TodoApi.Models;
+
+namespace TodoApi.Controllers;
+
+[ApiController]
+[Route("api/clerk/webhook")]
+public class ClerkWebhookController : ControllerBase
+{
+    private readonly NeondbContext _db;
+    private readonly IConfiguration _config;
+
+    public ClerkWebhookController(NeondbContext db, IConfiguration config)
+    {
+        _db = db;
+        _config = config;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Handle()
+    {
+        using var reader = new StreamReader(Request.Body);
+        var payload = await reader.ReadToEndAsync();
+
+        var secret = _config["Clerk:WebhookSecret"];
+
+        if (string.IsNullOrWhiteSpace(secret))
+            return StatusCode(500, "Missing Clerk webhook secret.");
+
+        var headers = new WebHeaderCollection
+        {
+            { "svix-id", Request.Headers["svix-id"].ToString() },
+            { "svix-timestamp", Request.Headers["svix-timestamp"].ToString() },
+            { "svix-signature", Request.Headers["svix-signature"].ToString() }
+        };
+
+        try
+        {
+            var webhook = new Webhook(secret);
+            webhook.Verify(payload, headers);
+        }
+        catch
+        {
+            return Unauthorized("Invalid webhook signature.");
+        }
+
+        using var json = JsonDocument.Parse(payload);
+        var root = json.RootElement;
+
+        var eventType = root.GetProperty("type").GetString();
+
+        if (eventType != "user.created" && eventType != "user.updated")
+            return Ok();
+
+        var data = root.GetProperty("data");
+        var clerkId = data.GetProperty("id").GetString();
+
+        var primaryEmailId = data.TryGetProperty("primary_email_address_id", out var primaryEmailElement)
+            ? primaryEmailElement.GetString()
+            : null;
+
+        string? email = null;
+
+        foreach (var emailAddress in data.GetProperty("email_addresses").EnumerateArray())
+        {
+            var id = emailAddress.GetProperty("id").GetString();
+
+            if (id == primaryEmailId || email == null)
+            {
+                email = emailAddress.GetProperty("email_address").GetString();
+            }
+        }
+
+        string? username = null;
+
+        if (data.TryGetProperty("username", out var usernameElement) &&
+            usernameElement.ValueKind != JsonValueKind.Null)
+        {
+            username = usernameElement.GetString();
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+            username = email?.Split('@')[0];
+
+        if (string.IsNullOrWhiteSpace(clerkId) || string.IsNullOrWhiteSpace(email))
+            return BadRequest("Missing Clerk user data.");
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId);
+
+        if (user == null)
+        {
+            user = new User
+            {
+                ClerkId = clerkId,
+                Email = email,
+                Username = username ?? clerkId,
+                Role = "Nutzer"
+                // CreatedAt - wird von Neon bereitgestellt
+            };
+
+            _db.Users.Add(user);
+        }
+        else
+        {
+            user.Email = email;
+            user.Username = username ?? user.Username;
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Ok();
+    }
+}
