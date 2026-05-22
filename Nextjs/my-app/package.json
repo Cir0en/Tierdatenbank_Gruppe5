@@ -10,6 +10,7 @@
     "export": "next build"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.4.0",
     "@maptiler/marker-layout": "^2.0.1",
     "@maptiler/sdk": "^4.0.1",
     "next": "16.2.4",

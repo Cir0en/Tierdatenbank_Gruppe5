@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.7" />
     <PackageReference Include="NextjsStaticHosting.AspNetCore" Version="0.9.3-preview" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
+    <PackageReference Include="Svix" Version="1.94.0" />
   </ItemGroup>
 
 </Project>
