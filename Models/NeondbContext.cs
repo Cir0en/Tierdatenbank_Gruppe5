@@ -228,6 +228,8 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("'Nutzer'::text")
                 .HasColumnName("role");
             entity.Property(e => e.Username).HasColumnName("username");
+            entity.Property(e => e.FirstName).HasColumnName("first_name");
+            entity.Property(e => e.LastName).HasColumnName("last_name");
         });
 
         OnModelCreatingPartial(modelBuilder);
