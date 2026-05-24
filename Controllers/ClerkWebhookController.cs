@@ -89,6 +89,22 @@ public class ClerkWebhookController : ControllerBase
         if (string.IsNullOrWhiteSpace(clerkId) || string.IsNullOrWhiteSpace(email))
             return BadRequest("Missing Clerk user data.");
 
+        string? firstName = null;
+
+        if (data.TryGetProperty("first_name", out var firstNameElement) &&
+            firstNameElement.ValueKind != JsonValueKind.Null)
+        {
+            firstName = firstNameElement.GetString();
+        }
+
+        string? lastName = null;
+
+        if (data.TryGetProperty("last_name", out var lastNameElement) &&
+            lastNameElement.ValueKind != JsonValueKind.Null)
+        {
+            lastName = lastNameElement.GetString();
+        }
+
         var user = await _db.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId);
 
         if (user == null)
@@ -98,6 +114,8 @@ public class ClerkWebhookController : ControllerBase
                 ClerkId = clerkId,
                 Email = email,
                 Username = username ?? clerkId,
+                FirstName = firstName,
+                LastName = lastName,
                 Role = "Nutzer"
                 // CreatedAt - wird von Neon bereitgestellt
             };
@@ -108,6 +126,12 @@ public class ClerkWebhookController : ControllerBase
         {
             user.Email = email;
             user.Username = username ?? user.Username;
+
+            if (!string.IsNullOrWhiteSpace(firstName))
+                user.FirstName = firstName;
+
+            if (!string.IsNullOrWhiteSpace(lastName))
+                user.LastName = lastName;
         }
 
         await _db.SaveChangesAsync();
