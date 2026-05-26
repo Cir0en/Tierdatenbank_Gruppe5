@@ -224,12 +224,13 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
             entity.Property(e => e.Email).HasColumnName("email");
+            entity.Property(e => e.FirstName).HasColumnName("first_name");
+            entity.Property(e => e.Institution).HasColumnName("institution");
+            entity.Property(e => e.LastName).HasColumnName("last_name");
             entity.Property(e => e.Role)
                 .HasDefaultValueSql("'Nutzer'::text")
                 .HasColumnName("role");
             entity.Property(e => e.Username).HasColumnName("username");
-            entity.Property(e => e.FirstName).HasColumnName("first_name");
-            entity.Property(e => e.LastName).HasColumnName("last_name");
         });
 
         OnModelCreatingPartial(modelBuilder);
