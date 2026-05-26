@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 
+// später adden: normale Nutzer dürfen Funde nur in eigenen Collections anlegen oder ändern
+
 namespace TodoApi.Controllers
 {
     [ApiController]
