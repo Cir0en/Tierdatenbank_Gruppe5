@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useSignIn, useClerk } from '@clerk/nextjs'; 
+import { useRouter } from 'next/router';
+import { useClerk } from '@clerk/nextjs'; 
+import { useSignIn } from '@clerk/nextjs/legacy';
 
 export default function LoginPage() {
-  const { signIn } = useSignIn(); // Clerk Hook (ohne isLoaded wegen TS)
+  const { isLoaded, signIn } = useSignIn(); // Clerk Hook (ohne isLoaded wegen TS)
   const { setActive } = useClerk();
   const router = useRouter();
 
@@ -19,22 +20,27 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signIn) return;
+    if (!isLoaded || !signIn) return;
     
     setLoading(true);
     setErrorMsg('');
 
     try {
-      const result = await signIn.create({
+      await signIn.create({
         identifier: email,
         password: password,
-      }) as any;
+      });
 
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
+      if (signIn.status === "complete" && signIn.createdSessionId) {
+        await setActive({ session: signIn.createdSessionId });
         router.push("/dashboard"); 
       } else {
-        console.log("Weitere Schritte nötig (z.B. MFA):", result);
+        console.log("Weitere Schritte nötig (z.B. MFA):", {
+          status: signIn.status,
+          createdSessionId: signIn.createdSessionId,
+          signIn,
+  });
+        setErrorMsg('Login konnte noch nicht abgeschlossen werden.');
       }
       
     } catch (err: any) {
@@ -281,7 +287,7 @@ export default function LoginPage() {
 
               <Link href="/passwort-vergessen" className="forgot-link">Passwort vergessen?</Link>
 
-              <button type="submit" className="submit-btn" disabled={loading}>
+              <button type="submit" className="submit-btn" disabled={loading|| !isLoaded}>
                 {loading ? <span className="spinner" /> : null}
                 {loading ? 'Anmelden…' : 'Anmelden'}
               </button>
