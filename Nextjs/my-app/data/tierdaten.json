@@ -1,0 +1,9 @@
+[
+  { "id": "OBJ-001", "name": "Papilio machaon",   "taxon": "Lepidoptera",  "fundort": "Bayern, DE",    "datum": "2026-04-12", "sammlung": "Schmetterlings-Kollektion", "status": "freigegeben" },
+  { "id": "OBJ-002", "name": "Carabus violaceus",  "taxon": "Coleoptera",   "fundort": "Sachsen, DE",   "datum": "2026-04-18", "sammlung": "Käfer-Kollektion",          "status": "freigegeben" },
+  { "id": "OBJ-003", "name": "Araneus diadematus", "taxon": "Arachnida",    "fundort": "Hessen, DE",    "datum": "2026-04-22", "sammlung": "Spinnentiere",              "status": "ausstehend"  },
+  { "id": "OBJ-004", "name": "Lacerta agilis",     "taxon": "Squamata",     "fundort": "Baden-WÜ, DE",  "datum": "2026-05-01", "sammlung": "Reptilien",                 "status": "freigegeben" },
+  { "id": "OBJ-005", "name": "Apis mellifera",     "taxon": "Hymenoptera",  "fundort": "NRW, DE",       "datum": "2026-05-03", "sammlung": "Bienen & Wespen",           "status": "ausstehend"  },
+  { "id": "OBJ-006", "name": "Rana temporaria",    "taxon": "Anura",        "fundort": "Brandenburg, DE","datum": "2026-05-07", "sammlung": "Amphibien",                "status": "freigegeben" },
+  { "id": "OBJ-007", "name": "Mus musculus",      "taxon": "Mammalia",     "fundort": "Sachsen-Anhalt, DE","datum": "2026-05-10", "sammlung": "Säugetiere",               "status": "abgelehnt"  }
+]

@@ -9,11 +9,9 @@ public partial class ObjectImage
 
     public int? ObjectId { get; set; }
 
-    public byte[] ImageData { get; set; } = null!;
-
-    public string? FileExtension { get; set; }
+    public string ImageUrl { get; set; } = null!;
 
     public DateTime? CreatedAt { get; set; }
 
-    public virtual Object? Object { get; set; }
+    public virtual CollectItem? Object { get; set; }
 }
