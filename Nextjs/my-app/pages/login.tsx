@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useClerk } from '@clerk/nextjs'; 
+import { useAuth, useClerk } from '@clerk/nextjs'; 
 import { useSignIn } from '@clerk/nextjs/legacy';
 
 export default function LoginPage() {
   const { isLoaded, signIn } = useSignIn(); // Clerk Hook (ohne isLoaded wegen TS)
   const { setActive } = useClerk();
+  const { isSignedIn } = useAuth();
   const router = useRouter();
 
   const [email, setEmail]       = useState('');
@@ -17,6 +18,16 @@ export default function LoginPage() {
   
   const [loading, setLoading]   = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    if (isSignedIn) {
+      router.push('/dashboard');
+    }
+  }, [isSignedIn, router]);
+
+  if (isSignedIn) {
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
