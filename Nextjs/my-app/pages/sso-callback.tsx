@@ -1,5 +1,16 @@
 import { AuthenticateWithRedirectCallback } from "@clerk/nextjs";
 
 export default function SSOCallbackPage() {
-  return <AuthenticateWithRedirectCallback />;
+  return (
+    <>
+      <div id="clerk-captcha" />
+      <AuthenticateWithRedirectCallback
+        signInForceRedirectUrl="/dashboard"
+        signUpForceRedirectUrl="/dashboard"
+        signInFallbackRedirectUrl="/dashboard"
+        signUpFallbackRedirectUrl="/dashboard"
+        />
+    </>
+
+  ); ;
 }
