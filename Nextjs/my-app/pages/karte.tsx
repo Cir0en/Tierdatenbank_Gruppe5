@@ -1,94 +1,210 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { Map, MapStyle, config } from '@maptiler/sdk';
+import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
-import { MarkerLayout } from '@maptiler/marker-layout';
 
 export default function MapPage() {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<Map | null>(null);
+  const mapInstance  = useRef<Map | null>(null);
 
   useEffect(() => {
-    // Sicherstellen, dass der Container existiert und die Map nur einmal initialisiert wird
     if (!mapContainer.current || mapInstance.current) return;
 
-    // Konfiguration der API[cite: 1] hier API Key eingeben von MapTilerCloud
-    config.apiKey = process.env.MAP_API_KEY as string;
+    config.apiKey = process.env.NEXT_PUBLIC_MAP_API_KEY as string;
 
-    // Map initialisieren[cite: 1]
     const map = new Map({
       container: mapContainer.current,
       style: MapStyle.STREETS,
-      geolocate: true
+      center: [8.0020, 50.9411],
+      zoom: 5,
     });
     mapInstance.current = map;
 
-    // Container für die Marker erstellen[cite: 1]
-    const markerContainer = document.createElement("div");
-    mapContainer.current.appendChild(markerContainer);
+    // ── Marker-Element erstellen ─────────────────────────────────────────
+    const createMarkerElement = (artname: string, geschlecht?: string) => {
+      const el = document.createElement('div');
+      el.className = 'custom-marker';
+      const icon = geschlecht === 'Männlich' ? '♂' : geschlecht === 'Weiblich' ? '♀' : '◉';
+      el.innerHTML = `
+        <div class="markerBody">
+          <span class="markerIcon">${icon}</span>
+          <div class="markerText">${artname}</div>
+        </div>
+      `;
+      return el;
+    };
 
-    (async () => {
-      await map.onReadyAsync();
+    // ── Popup-Formular HTML ──────────────────────────────────────────────
+    const buildPopupContent = () => {
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="popup-form">
+          <div class="popup-title">🐾 Neues Tier erfassen</div>
 
-      // MarkerLayout konfigurieren[cite: 1]
-      const markerManager = new MarkerLayout(map as any, {
-        layers: ["City labels", "Place labels", "Town labels"],
-        markerSize: [140, 80],
-        markerAnchor: "top",
-        offset: [0, -8],
-        sortingProperty: "rank",
-        filter: (feature) => {
-          if (["City labels", "Town labels"].includes(feature.layer.id)) {
-            return true;
-          } else {
-            return ["village"].includes(feature.properties.class);
-          }
+          <!-- Artname (Pflichtfeld) -->
+          <div class="form-group">
+            <label class="form-label">
+              Artname <span class="required">*</span>
+            </label>
+            <input
+              id="f-artname"
+              type="text"
+              placeholder="z. B. Papilio machaon"
+              class="form-input"
+              required
+            />
+            <span class="field-hint" id="hint-artname" style="display:none;">
+              Bitte Artname eingeben.
+            </span>
+          </div>
+
+          <!-- Geschlecht -->
+          <div class="form-group">
+            <label class="form-label">Geschlecht</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="geschlecht" value="Männlich" />
+                <span>♂ Männlich</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="geschlecht" value="Weiblich" />
+                <span>♀ Weiblich</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="geschlecht" value="Unbekannt" checked />
+                <span>◉ Unbekannt</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Altersklasse -->
+          <div class="form-group">
+            <label class="form-label">Altersklasse</label>
+            <select id="f-altersklasse" class="form-input form-select">
+              <option value="">— nicht angegeben —</option>
+              <option value="Juvenile">Juvenil (Jungtier)</option>
+              <option value="Subadult">Subadult</option>
+              <option value="Adult">Adult (Erwachsen)</option>
+              <option value="Senior">Senior</option>
+            </select>
+          </div>
+
+          <!-- Körpermasse + Körperlänge nebeneinander -->
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Körpermasse</label>
+              <div class="input-unit-wrap">
+                <input
+                  id="f-masse"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  class="form-input input-unit"
+                />
+                <span class="unit-label">g</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Körperlänge</label>
+              <div class="input-unit-wrap">
+                <input
+                  id="f-laenge"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  placeholder="0.0"
+                  class="form-input input-unit"
+                />
+                <span class="unit-label">mm</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Buttons -->
+          <div class="form-actions">
+            <button id="btn-cancel" class="btn-cancel">Abbrechen</button>
+            <button id="btn-save"   class="btn-save">💾 Speichern</button>
+          </div>
+        </div>
+      `;
+      return div;
+    };
+
+    // ── Klick auf Karte ──────────────────────────────────────────────────
+    map.on('click', (e) => {
+      const { lng, lat } = e.lngLat;
+      const content = buildPopupContent();
+
+      const popup = new Popup({
+        closeButton: true,
+        closeOnClick: false,
+        maxWidth: '340px',
+      })
+        .setLngLat([lng, lat])
+        .setDOMContent(content)
+        .addTo(map);
+
+      // Fokus auf Artname
+      setTimeout(() => {
+        (content.querySelector('#f-artname') as HTMLInputElement)?.focus();
+      }, 100);
+
+      // Abbrechen
+      content.querySelector('#btn-cancel')?.addEventListener('click', () => {
+        popup.remove();
+      });
+
+      // Speichern
+      content.querySelector('#btn-save')?.addEventListener('click', () => {
+        const artnameEl    = content.querySelector('#f-artname')    as HTMLInputElement;
+        const altersEl     = content.querySelector('#f-altersklasse') as HTMLSelectElement;
+        const masseEl      = content.querySelector('#f-masse')      as HTMLInputElement;
+        const laengeEl     = content.querySelector('#f-laenge')     as HTMLInputElement;
+        const geschlechtEl = content.querySelector('input[name="geschlecht"]:checked') as HTMLInputElement;
+        const hintArtname  = content.querySelector('#hint-artname') as HTMLElement;
+
+        const artname     = artnameEl.value.trim();
+        const geschlecht  = geschlechtEl?.value ?? 'Unbekannt';
+        const altersklasse = altersEl.value;
+        const masse       = masseEl.value  ? parseFloat(masseEl.value)  : null;
+        const laenge      = laengeEl.value ? parseFloat(laengeEl.value) : null;
+
+        // Validierung: nur Artname ist Pflicht
+        if (!artname) {
+          artnameEl.classList.add('input-error');
+          hintArtname.style.display = 'block';
+          artnameEl.focus();
+          return;
         }
+
+        // Marker auf Karte setzen
+        const markerEl = createMarkerElement(artname, geschlecht);
+        new Marker({ element: markerEl })
+          .setLngLat([lng, lat])
+          .addTo(map);
+
+        popup.remove();
+
+        const data = { artname, geschlecht, altersklasse, masse, laenge, lng, lat };
+        console.log('Gespeichert (lokal):', data);
+        // TODO: fetch('/api/save-marker', { method: 'POST', body: JSON.stringify(data) })
       });
 
-      const markerLogicContainer: { [key: string]: HTMLDivElement } = {};
-
-      // Funktion zum Aktualisieren der Marker[cite: 1]
-      const updateMarkers = () => {
-        const markerStatus = markerManager.update();
-        if (!markerStatus) return;
-
-        // Entfernen[cite: 1]
-        markerStatus.removed.forEach((abstractMarker) => {
-          const markerDiv = markerLogicContainer[abstractMarker.id];
-          if (markerDiv) {
-            delete markerLogicContainer[abstractMarker.id];
-            markerContainer.removeChild(markerDiv);
-          }
-        });
-
-        // Aktualisieren[cite: 1]
-        markerStatus.updated.forEach((abstractMarker) => {
-          const markerDiv = markerLogicContainer[abstractMarker.id];
-          if (markerDiv) {
-            updateMarkerDiv(abstractMarker, markerDiv);
-          }
-        });
-
-        // Neu erstellen[cite: 1]
-        markerStatus.new.forEach((abstractMarker) => {
-          const markerDiv = makeMarker(abstractMarker);
-          markerLogicContainer[abstractMarker.id] = markerDiv;
-          markerContainer.appendChild(markerDiv);
-        });
-      };
-
-      // Event-Listener registrieren[cite: 1]
-      map.on("move", updateMarkers);
-      map.on("moveend", () => {
-        map.once("idle", updateMarkers);
+      // Fehlerstatus zurücksetzen beim Tippen
+      content.querySelector('#f-artname')?.addEventListener('input', () => {
+        (content.querySelector('#f-artname') as HTMLInputElement).classList.remove('input-error');
+        (content.querySelector('#hint-artname') as HTMLElement).style.display = 'none';
       });
+    });
 
-      updateMarkers();
-    })();
+    // ── Initialer Beispiel-Marker ────────────────────────────────────────
+    const initialEl = createMarkerElement('Papilio machaon', 'Männlich');
+    new Marker({ element: initialEl })
+      .setLngLat([8.0020, 50.9411])
+      .addTo(map);
 
-    // Aufräumen beim Verlassen der Seite
     return () => {
       if (mapInstance.current) {
         mapInstance.current.remove();
@@ -100,65 +216,116 @@ export default function MapPage() {
   return (
     <main style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
-      
-      {/* Styles für die Marker (können auch in eine CSS-Datei) */}
+
       <style jsx global>{`
-        .marker {
-          position: absolute;
-          pointer-events: none;
-          will-change: transform;
-        }
+        /* ── Marker ── */
+        .custom-marker { pointer-events: auto; cursor: pointer; }
         .markerBody {
-          background: white;
-          border-radius: 8px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-          padding: 8px;
+          display: flex; align-items: center; gap: 6px;
+          background: #fff; border: 2px solid #0078FF;
+          border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          padding: 6px 14px; transition: transform 0.2s ease;
+        }
+        .markerBody:hover { transform: scale(1.08); }
+        .markerIcon { font-size: 14px; color: #0078FF; }
+        .markerText { font-weight: 600; font-size: 13px; color: #202124; font-family: sans-serif; }
+
+        /* ── Popup wrapper ── */
+        .maplibregl-popup-content,
+        .mapboxgl-popup-content {
+          padding: 0 !important;
+          border-radius: 12px !important;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.18) !important;
+          overflow: hidden;
           font-family: sans-serif;
         }
-        .markerTop {
-          font-weight: bold;
-          border-bottom: 1px solid #eee;
-          margin-bottom: 4px;
+
+        /* ── Form ── */
+        .popup-form { padding: 18px 18px 14px; min-width: 280px; }
+        .popup-title {
+          font-size: 15px; font-weight: 600; color: #202124;
+          margin-bottom: 14px; padding-bottom: 10px;
+          border-bottom: 1px solid #e0e0e0;
         }
-        .fade-in-animation {
-          animation: fadeIn 0.3s ease-in;
+        .form-group { margin-bottom: 12px; }
+        .form-row {
+          display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+          margin-bottom: 12px;
         }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
+        .form-row .form-group { margin-bottom: 0; }
+
+        .form-label {
+          display: block; font-size: 11px; font-weight: 600;
+          color: #5f6368; text-transform: uppercase; letter-spacing: 0.06em;
+          margin-bottom: 5px;
         }
+        .required { color: #ea4335; }
+
+        .form-input {
+          width: 100%; padding: 8px 10px; border-radius: 6px;
+          border: 1px solid #dadce0; font-size: 13px; color: #202124;
+          background: #fff; outline: none; font-family: sans-serif;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          box-sizing: border-box;
+        }
+        .form-input:focus {
+          border-color: #0078FF;
+          box-shadow: 0 0 0 3px rgba(0,120,255,0.1);
+        }
+        .form-input.input-error {
+          border-color: #ea4335;
+          box-shadow: 0 0 0 3px rgba(234,67,53,0.1);
+        }
+        .form-select { cursor: pointer; }
+
+        /* Einheit-Wrapper */
+        .input-unit-wrap { position: relative; display: flex; align-items: center; }
+        .input-unit { padding-right: 32px !important; }
+        .unit-label {
+          position: absolute; right: 10px;
+          font-size: 11px; color: #9aa0a6; font-weight: 500; pointer-events: none;
+        }
+
+        /* Radio buttons */
+        .radio-group {
+          display: flex; gap: 8px; flex-wrap: wrap;
+        }
+        .radio-label {
+          display: flex; align-items: center; gap: 5px;
+          font-size: 12px; color: #202124; cursor: pointer;
+          background: #f8f9fa; border: 1px solid #dadce0;
+          border-radius: 20px; padding: 4px 10px;
+          transition: all 0.15s; user-select: none;
+        }
+        .radio-label:hover { border-color: #0078FF; background: #e8f0fe; }
+        .radio-label input[type="radio"] { display: none; }
+        .radio-label:has(input:checked) {
+          background: #e8f0fe; border-color: #0078FF; color: #0078FF; font-weight: 500;
+        }
+
+        /* Hint */
+        .field-hint { font-size: 11px; color: #ea4335; margin-top: 4px; display: block; }
+
+        /* Buttons */
+        .form-actions {
+          display: flex; gap: 8px; justify-content: flex-end;
+          margin-top: 14px; padding-top: 12px; border-top: 1px solid #f1f3f4;
+        }
+        .btn-cancel {
+          padding: 7px 16px; border-radius: 6px; border: 1px solid #dadce0;
+          background: #fff; font-size: 13px; color: #5f6368; cursor: pointer;
+          font-weight: 500; font-family: sans-serif; transition: all 0.15s;
+        }
+        .btn-cancel:hover { background: #f1f3f4; }
+        .btn-save {
+          padding: 7px 18px; border-radius: 6px; border: none;
+          background: #0078FF; color: #fff; font-size: 13px;
+          font-weight: 600; cursor: pointer; font-family: sans-serif;
+          transition: background 0.15s, box-shadow 0.15s;
+          box-shadow: 0 1px 4px rgba(0,120,255,0.3);
+        }
+        .btn-save:hover { background: #0060cc; box-shadow: 0 2px 8px rgba(0,120,255,0.4); }
       `}</style>
     </main>
   );
-}
-
-// Hilfsfunktionen außerhalb der Komponente[cite: 1]
-function makeMarker(abstractMarker: any) {
-  const marker = document.createElement("div");
-  marker.classList.add("marker");
-  marker.classList.add('fade-in-animation');
-  updateMarkerDiv(abstractMarker, marker);
-
-  const feature = abstractMarker.features[0];
-  marker.innerHTML = `
-    <div class="markerPointy"></div>
-    <div class="markerBody">
-      <div class="markerTop">
-        ${feature.properties["name:en"] || feature.properties["name"]}
-      </div>
-      <div class="markerBottom">
-        <ul style="list-style: none; padding: 0; margin: 0; font-size: 11px;">
-          <li><b>Name:</b> ${feature.properties.name}</li>
-          <li><b>Rank:</b> ${feature.properties.rank}</li>
-        </ul>
-      </div>
-    </div>
-  `;
-  return marker;
-}
-
-function updateMarkerDiv(abstractMarker: any, marker: HTMLDivElement) {
-  marker.style.width = `${abstractMarker.size[0]}px`;
-  marker.style.height = `${abstractMarker.size[1]}px`;
-  marker.style.transform = `translate(${abstractMarker.position[0]}px, ${abstractMarker.position[1]}px)`;
 }
