@@ -17,48 +17,19 @@ namespace TodoApi.Controllers
             _context = context;
         }
 
-        [HttpGet("public")]
-        [AllowAnonymous]
-
-        public async Task<ActionResult<IEnumerable<CollectionListDto>>> GetPublicCollections()
-        {
-            var collections = await _context.Collections
-                .Where(c => c.IsPublic == true)
-                .Select(c => new CollectionListDto
-                {
-                    Id = c.Id,
-                    Name = c.Name,
-                    Description = c.Description,
-                    IsPublic = c.IsPublic ?? false,
-                    ItemCount = c.CollectItems.Count,
-                    OwnerUsername = c.User != null ? c.User.Username : null,
-                    IsOwner = false,
-                    CanEdit = false,
-                    CanDelete = false
-                }).ToListAsync();
-
-            return Ok(collections);
-
-        }
-
         [HttpGet]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<CollectionListDto>>> GetCollections()
         {
             var currentUser = await GetCurrentUserAsync();
 
-            if (currentUser == null)
-            {
-                return Unauthorized();
-            }
-
-            var canModerate = CanModerateCollections(currentUser);
+            var canModerate = currentUser != null && CanModerateCollections(currentUser);
 
             var collections = await _context.Collections
                 .Where(c =>
-                    canModerate ||
                     c.IsPublic == true ||
-                    c.UserId == currentUser.Id)
+                    currentUser != null && c.UserId == currentUser.Id ||
+                    canModerate)
                 .Select(c => new CollectionListDto
                 {
                     Id = c.Id,
@@ -68,9 +39,9 @@ namespace TodoApi.Controllers
                     ItemCount = c.CollectItems.Count,
                     OwnerUsername = c.User != null ? c.User.Username : null,
 
-                    IsOwner = c.UserId == currentUser.Id,
-                    CanEdit = canModerate || c.UserId == currentUser.Id,
-                    CanDelete = canModerate || c.UserId == currentUser.Id
+                    IsOwner = currentUser != null && c.UserId == currentUser.Id,
+                    CanEdit = currentUser != null && (canModerate || c.UserId == currentUser.Id),
+                    CanDelete = currentUser != null && (canModerate || c.UserId == currentUser.Id)
                 })
                 .ToListAsync();
 
@@ -240,9 +211,8 @@ namespace TodoApi.Controllers
 
         private static bool CanModerateCollections(User user)
         {
-            return user.Role == "Administrator"
-                || user.Role == "Moderator"
-                || user.Role == "Verifizierter Nutzer";
+            return user.Role == "Admin"
+                || user.Role == "Moderator";
         }
     }
 }
