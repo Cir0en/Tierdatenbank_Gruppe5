@@ -108,7 +108,7 @@ export default function RegisterPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { min-height: 100vh; font-family: 'Inter', sans-serif; background: #eef2ee; color: #1a1a1a; }
+        html, body { min-height: 100vh; font-family: 'Inter', sans-serif; background: #eef2ee; color: #1a1a1a; zoom: 1.33;}
 
         .page { min-height: 100vh; background: #eef2ee; display: flex; flex-direction: column; }
         .page-label { padding: 18px 32px; font-size: 13px; color: #9ca3af; }
