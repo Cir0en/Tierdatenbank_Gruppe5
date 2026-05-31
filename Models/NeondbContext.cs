@@ -52,10 +52,14 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.Description).HasColumnName("description");
             entity.Property(e => e.FindDate).HasColumnName("find_date");
             entity.Property(e => e.FindingLocationId).HasColumnName("finding_location_id");
-            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.SpeciesName).HasColumnName("name");
             entity.Property(e => e.Status).HasColumnName("status");
             entity.Property(e => e.StorageInfo).HasColumnName("storage_info");
             entity.Property(e => e.TaxonomyId).HasColumnName("taxonomy_id");
+            entity.Property(e => e.Sex).HasColumnName("sex");
+            entity.Property(e => e.AgeClass).HasColumnName("age_class");
+            entity.Property(e => e.BodyMassGram).HasColumnName("body_mass_gram");
+            entity.Property(e => e.BodyLengthMm).HasColumnName("body_length_mm");
 
             entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
                 .HasForeignKey(d => d.CollectionId)

@@ -224,7 +224,7 @@ namespace TodoApi.Controllers
                 .Select(i => new GeoMapItemDto
                 {
                     ItemId = i.Id,
-                    ItemName = i.Name,
+                    ItemName = i.SpeciesName,
 
                     LocationId = i.FindingLocation!.Id,
                     LocationName = i.FindingLocation.Name,
