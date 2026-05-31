@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from "react";
+import Navbar from "../components/Navbar";
 
 // =====================================================================
 // 1. DATEN FÜR DIE TIERARTEN
@@ -45,87 +46,18 @@ export default function TaxonomenPage() {
 
         .app-layout {
           display: flex;
-          min-height: 100vh;
-          padding: 24px;
-          gap: 24px;
-        }
-
-        /* Sidebar */
-        .sidebar {
-          width: 88px;
-          border-radius: 12px;
-          background: linear-gradient(180deg, #0f3d2e, #1b5e20);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: 24px 0;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-          flex-shrink: 0;
-        }
-
-        .sidebar-icon {
-          margin-bottom: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .nav-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          width: 100%;
-          align-items: center;
-        }
-
-        .nav-btn {
-          width: 48px;
-          height: 48px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          color: rgba(255,255,255,0.7);
-          transition: background 0.2s, color 0.2s;
-        }
-
-        .nav-btn:hover {
-          background: rgba(255,255,255,0.1);
-        }
-
-        .nav-btn.active {
-          background-color: #e8f5e9;
-        }
-
-        .profile-btn {
-          margin-top: auto;
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: #2e7d32;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 2px solid rgba(255,255,255,0.2);
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        
-        .profile-btn:hover {
-          background: #1b5e20;
+          height: 100vh;
+          overflow: hidden;
         }
 
         /* Main Content Area */
         .main-content {
           flex: 1;
           background: #ffffff;
-          border: 1px solid #dadce0;
-          border-radius: 12px;
           padding: 40px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.12);
           display: flex;
           flex-direction: column;
+          overflow-y: auto;
         }
 
         .header {
@@ -336,42 +268,9 @@ export default function TaxonomenPage() {
       `}</style>
 
       <div className="app-layout">
-        
-        {/* === SIDEBAR === */}
-        <aside className="sidebar">
-        <div className="sidebar-icon">
-          {/* Logo: widow.svg existiert nicht – entweder Datei hinzufügen oder weglassen */}
-          <img src="/blatt.svg" alt="Logo" width={32} height={32}
-            onError={(e) => e.currentTarget.style.display = 'none'} />
-        </div>
-        
-        <nav className="nav-list">
-          <div className="nav-btn">
-            <img src="/ordner.svg" alt="Ordner" width={24} height={24}
-              onError={(e) => e.currentTarget.style.display = 'none'} />
-          </div>
-          
-          <div className="nav-btn">
-            <img src="/karte.svg" alt="Karte" width={24} height={24}
-              onError={(e) => e.currentTarget.style.display = 'none'} />
-          </div>
-          
-          <div className="nav-btn active">
-            <img src="/dokument.svg" alt="Dokument" width={24} height={24}
-              onError={(e) => e.currentTarget.style.display = 'none'} />
-          </div>
-          
-          <div className="nav-btn">
-            <img src="/Zahnrad.svg" alt="Einstellungen" width={24} height={24}
-              onError={(e) => e.currentTarget.style.display = 'none'} />
-          </div>
-        </nav>
 
-        <div className="profile-btn">
-          <img src="/mensch.svg" alt="Profil" width={20} height={20}
-            onError={(e) => e.currentTarget.style.display = 'none'} />
-        </div>
-      </aside>
+        {/* === SIDEBAR === */}
+        <Navbar activeNav="tierliste" />
 
         {/* === MAIN CONTENT === */}
         <main className="main-content">

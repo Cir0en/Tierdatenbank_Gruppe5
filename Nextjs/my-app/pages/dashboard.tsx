@@ -2,28 +2,20 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useClerk } from "@clerk/nextjs";
+import { useRouter } from "next/router";
 import testdata from '../data/tierdaten.json';
 import { formatDate } from "../utils/date";
+import Navbar from "../components/Navbar";
 
 
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type NavItem = { id: string; label: string; icon: string; href: string };
 type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
   datum?: string; findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 }; 
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
-
-// ── Static data (replace with API calls) ──────────────────────────────────
-const NAV_ITEMS: NavItem[] = [
-  { id: "index",     label: "Übersicht",  icon: "⬡", href: "/dashboard" },
-  { id: "tierliste", label: "Tierliste",  icon: "◈", href: "/tierliste"  },
-  { id: "karte",     label: "Karte",      icon: "◎", href: "/karte"      },
-  { id: "leihe",     label: "Leihe",      icon: "⇄", href: "/leihe"      },
-  { id: "export",    label: "Import / Export", icon: "⇅", href: "/export" },
-  { id: "taxonomie", label: "Taxonomie",  icon: "⊞", href: "/taxonomie"  },
-];
 
 // Testtiere zur Darstellung
 /*
@@ -79,11 +71,8 @@ function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] })
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [activeNav, setActiveNav] = useState("index");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const userName = "Prof. Dr. E. Yalcin";
-  const userRole = "Moderator";
-  const initials = "EY";
+  const { signOut } = useClerk();
+  const router = useRouter();
 
   // Testlauf für API-Daten
 
@@ -176,57 +165,6 @@ export default function DashboardPage() {
 
         /* ── App shell ── */
         .app { position: relative; z-index: 10; display: flex; height: 100vh; overflow: hidden; }
-
-        /* ── Sidebar ── */
-        .sidebar {
-          width: var(--sidebar-w); flex-shrink: 0;
-          background: var(--bg-surface); border-right: 1px solid var(--border);
-          display: flex; flex-direction: column;
-          transition: width 0.25s cubic-bezier(.4,0,.2,1);
-          overflow: hidden;
-        }
-        .sidebar.collapsed { width: 52px; }
-
-        .sidebar-header {
-          height: var(--top-h); display: flex; align-items: center; gap: 10px;
-          padding: 0 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-        }
-        .logo-icon {
-          width: 26px; height: 26px; flex-shrink: 0; border: 1px solid var(--green-dim);
-          border-radius: 2px; display: flex; align-items: center; justify-content: center;
-          font-size: 13px; background: var(--green-glow);
-        }
-        .logo-text {
-          font-family: var(--ff-serif); font-size: 13px; letter-spacing: 0.2em;
-          color: var(--text-mid); text-transform: uppercase; white-space: nowrap;
-        }
-        .sidebar-version {
-          margin-left: auto; font-size: 9px; letter-spacing: 0.1em;
-          color: var(--text-lo); flex-shrink: 0;
-        }
-
-        .nav { flex: 1; padding: 12px 0; overflow-y: auto; }
-        .nav-item {
-          display: flex; align-items: center; gap: 10px; padding: 9px 14px;
-          cursor: pointer; border-left: 2px solid transparent;
-          transition: all 0.15s; white-space: nowrap; text-decoration: none; color: inherit;
-        }
-        .nav-item:hover { background: var(--green-glow); border-left-color: var(--green-dim); }
-        .nav-item.active { background: rgba(74,110,61,0.12); border-left-color: var(--green); }
-        .nav-item.active .nav-label { color: var(--text-hi); }
-        .nav-icon { font-size: 14px; flex-shrink: 0; width: 20px; text-align: center; }
-        .nav-label { font-size: 11px; letter-spacing: 0.08em; color: var(--text-mid); }
-
-        .sidebar-footer {
-          padding: 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0;
-        }
-        .collapse-btn {
-          width: 100%; display: flex; align-items: center; gap: 8px; background: none;
-          border: 1px solid var(--border); border-radius: 2px; padding: 6px 10px;
-          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono);
-          font-size: 10px; letter-spacing: 0.1em; transition: all 0.15s;
-        }
-        .collapse-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
 
         /* ── Main area ── */
         .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
@@ -474,38 +412,7 @@ export default function DashboardPage() {
 
       <div className="app">
         {/* ── Sidebar ── */}
-        <aside className={`sidebar${sidebarOpen ? "" : " collapsed"}`}>
-          <div className="sidebar-header">
-            <div className="logo-icon">🔬</div>
-            {sidebarOpen && (
-              <>
-                <span className="logo-text">Collectio</span>
-                <span className="sidebar-version">v2.0</span>
-              </>
-            )}
-          </div>
-
-          <nav className="nav">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.id}
-                href={item.href}
-                className={`nav-item${activeNav === item.id ? " active" : ""}`}
-                onClick={() => setActiveNav(item.id)}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                {sidebarOpen && <span className="nav-label">{item.label}</span>}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="sidebar-footer">
-            <button className="collapse-btn" onClick={() => setSidebarOpen((v) => !v)}>
-              <span>{sidebarOpen ? "◂" : "▸"}</span>
-              {sidebarOpen && <span>Einklappen</span>}
-            </button>
-          </div>
-        </aside>
+        <Navbar activeNav="index" />
 
         {/* ── Main ── */}
         <div className="main">
@@ -530,17 +437,12 @@ export default function DashboardPage() {
               )}
             </button>
 
-            {/* Profile */}
-            <div className="profile-chip">
-              <div className="avatar">{initials}</div>
-              <div>
-                <div className="profile-name">{userName}</div>
-                <div className="profile-role">{userRole}</div>
-              </div>
-            </div>
-
             {/* Logout */}
-            <button className="logout-btn" title="Abmelden">
+            <button
+              className="logout-btn"
+              title="Abmelden"
+              onClick={() => signOut(() => router.push("/login"))}
+            >
               ⏻ Abmelden
             </button>
           </header>
