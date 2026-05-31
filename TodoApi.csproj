@@ -19,5 +19,12 @@
     <PackageReference Include="Svix" Version="1.94.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="App\**\*.cs" />
+    <EmbeddedResource Remove="App\**\*.resx" />
+    <None Remove="App\**\*.*" />
+    <Content Remove="App\**\*.*" />
+  </ItemGroup>
+
 </Project>
 
