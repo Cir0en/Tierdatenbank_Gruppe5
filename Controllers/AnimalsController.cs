@@ -66,7 +66,7 @@ namespace TodoApi.Controllers
         [HttpPost("map")]
         public async Task<ActionResult<CollectItem>> CreateMapAnimal(CreateMapAnimalDto dto)
         {
-            if (string.IsNullOrWhiteSpace(dto.SpeciesName))
+            if (string.IsNullOrWhiteSpace(dto.Name))
             {
                 return BadRequest("SpeciesName Artname fehlt");
             }
@@ -115,7 +115,7 @@ namespace TodoApi.Controllers
 
             var item = new CollectItem
             {
-                Name = dto.SpeciesName,
+                Name = dto.Name,
                 Sex = dto.Sex,
                 AgeClass = dto.AgeClass,
                 BodyMassGram = dto.BodyMassGram,
