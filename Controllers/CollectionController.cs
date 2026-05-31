@@ -79,7 +79,7 @@ namespace TodoApi.Controllers
                     Items = c.CollectItems.Select(item => new CollectionItemDto
                     {
                         Id = item.Id,
-                        Name = item.SpeciesName,
+                        Name = item.Name,
                         FindDate = item.FindDate,
                         Status = item.Status
                     }).ToList()

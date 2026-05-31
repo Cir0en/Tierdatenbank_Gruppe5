@@ -43,7 +43,7 @@ namespace TodoApi.Controllers
                 .Select(c => new
                 {
                     c.Id,
-                    c.SpeciesName,
+                    c.Name,
                     c.TaxonomyId,
                     c.FindingLocationId,
                     c.FindDate
@@ -115,7 +115,7 @@ namespace TodoApi.Controllers
 
             var item = new CollectItem
             {
-                SpeciesName = dto.SpeciesName,
+                Name = dto.SpeciesName,
                 Sex = dto.Sex,
                 AgeClass = dto.AgeClass,
                 BodyMassGram = dto.BodyMassGram,
