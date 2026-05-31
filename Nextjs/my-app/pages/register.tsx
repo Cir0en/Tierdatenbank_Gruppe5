@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSignUp } from '@clerk/nextjs'; 
+import { useAuth, useClerk } from '@clerk/nextjs'; 
+import { useRouter } from 'next/router';
+import { useSignUp } from '@clerk/nextjs/legacy';
 
 function calcStrength(pw: string) {
   let s = 0;
@@ -14,7 +16,10 @@ function calcStrength(pw: string) {
 }
 
 export default function RegisterPage() {
-  const { signUp } = useSignUp(); 
+  const { isLoaded, signUp } = useSignUp(); 
+  const { setActive } = useClerk();
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
 
   const [name, setName]           = useState('');
   const [email, setEmail]         = useState('');
@@ -27,7 +32,16 @@ export default function RegisterPage() {
   
   const [loading, setLoading]     = useState(false);
   const [success, setSuccess]     = useState(false);
-  const [errorMsg, setErrorMsg]   = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  
+  useEffect(() => {
+    if (isSignedIn) {
+      router.push('/dashboard');
+    }
+  }, [isSignedIn, router]);
+
+  if (isSignedIn) {
+  return null;}
 
   const strength   = calcStrength(password);
   const pwMatch    = confirm.length > 0 && password === confirm;
@@ -38,24 +52,48 @@ export default function RegisterPage() {
   const STRENGTH_COLOR = ['#e5e7eb', '#ef4444', '#f97316', '#eab308', '#22c55e'];
   const STRENGTH_LABEL = ['', 'Sehr schwach', 'Schwach', 'Mittel', 'Stark'];
 
+  const splitFullName = (fullName: string) => {
+    const parts = fullName.trim().split(/\s+/);
+    return {
+      firstName: parts[0] ?? '',
+      lastName: parts.slice(1).join(' '),
+    };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || !signUp) return;
+    if (!canSubmit || !isLoaded || !signUp) return;
     
     setLoading(true);
     setErrorMsg('');
 
     try {
+      const { firstName, lastName } = splitFullName(name);
       await signUp.create({
         emailAddress: email,
         password: password,
+        firstName: firstName,
+        lastName: lastName,
         unsafeMetadata: {
-          fullName: name,
-          role: role,
+          requestedRole: role
         },
       });
 
-      setSuccess(true);
+      if (signUp.status === 'complete' && signUp.createdSessionId) {
+        await setActive(
+          {
+            session: signUp.createdSessionId,
+          }
+        );
+        router.push('/dashboard');
+      } else {
+        console.log('Weitere Schritte nötig:', {
+          status: signUp.status,
+          createdSessionId: signUp.createdSessionId,
+          signUp,
+        });
+        setErrorMsg('Registrierung konnte nicht abgeschlossen werden.');
+      }
       
     } catch (err: any) {
       console.error(err);
@@ -70,7 +108,7 @@ export default function RegisterPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { min-height: 100vh; font-family: 'Inter', sans-serif; background: #eef2ee; color: #1a1a1a; }
+        html, body { min-height: 100vh; font-family: 'Inter', sans-serif; background: #eef2ee; color: #1a1a1a; zoom: 1.33;}
 
         .page { min-height: 100vh; background: #eef2ee; display: flex; flex-direction: column; }
         .page-label { padding: 18px 32px; font-size: 13px; color: #9ca3af; }
@@ -258,6 +296,10 @@ export default function RegisterPage() {
           color: #b91c1c; padding: 12px; margin-bottom: 16px; font-size: 13px;
           border-radius: 4px;
         }
+
+        .captcha-wrap {
+          margin-bottom: 16px;
+        }
       `}</style>
 
       <div className="page">
@@ -410,6 +452,10 @@ export default function RegisterPage() {
                       {' '}und{' '}
                       <a href="#" className="agree-link">Datenschutzrichtlinien</a>
                     </label>
+                  </div>
+
+                  <div className="captcha-wrap">
+                    <div id="clerk-captcha" />
                   </div>
 
                   <button type="submit" className="submit-btn" disabled={!canSubmit || loading}>

@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useSignIn, useClerk } from '@clerk/nextjs'; 
+import { useRouter } from 'next/router';
+import { useAuth, useClerk } from '@clerk/nextjs'; 
+import { useSignIn } from '@clerk/nextjs/legacy';
 
 export default function LoginPage() {
-  const { signIn } = useSignIn(); // Clerk Hook (ohne isLoaded wegen TS)
+  const { isLoaded, signIn } = useSignIn(); // Clerk Hook (ohne isLoaded wegen TS)
   const { setActive } = useClerk();
+  const { isSignedIn } = useAuth();
   const router = useRouter();
 
   const [email, setEmail]       = useState('');
@@ -17,24 +19,48 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const loginBoxRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (loginBoxRef.current) {
+      // block: 'center' sorgt dafür, dass das Element exakt in der Bildschirmmitte landet
+      loginBoxRef.current.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSignedIn) {
+      router.push('/dashboard');
+    }
+  }, [isSignedIn, router]);
+
+  if (isSignedIn) {
+    return null;
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signIn) return;
+    if (!isLoaded || !signIn) return;
     
     setLoading(true);
     setErrorMsg('');
 
     try {
-      const result = await signIn.create({
+      await signIn.create({
         identifier: email,
         password: password,
-      }) as any;
+      });
 
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
+      if (signIn.status === "complete" && signIn.createdSessionId) {
+        await setActive({ session: signIn.createdSessionId });
         router.push("/dashboard"); 
       } else {
-        console.log("Weitere Schritte nötig (z.B. MFA):", result);
+        console.log("Weitere Schritte nötig (z.B. MFA):", {
+          status: signIn.status,
+          createdSessionId: signIn.createdSessionId,
+          signIn,
+        });
+        setErrorMsg('Login konnte noch nicht abgeschlossen werden.');
       }
       
     } catch (err: any) {
@@ -59,17 +85,39 @@ export default function LoginPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { min-height: 100vh; font-family: 'Inter', sans-serif; background: #eef2ee; color: #1a1a1a; }
+        
+        html, body { 
+          min-height: 100vh; 
+          font-family: 'Inter', sans-serif; 
+          background: #eef2ee; 
+          color: #1a1a1a; 
+          zoom: 1.33;
+        }
 
-        .page { min-height: 100vh; background: #eef2ee; display: flex; flex-direction: column; }
+        .page { 
+          min-height: 100vh; 
+          background: #eef2ee; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center;
+          position: relative; 
+        }
 
         .page-label {
-          padding: 18px 32px; font-size: 13px; color: #9ca3af; font-weight: 400;
+          position: absolute; 
+          top: 0; 
+          left: 0;
+          padding: 18px 32px; 
+          font-size: 13px; 
+          color: #9ca3af; 
+          font-weight: 400;
         }
 
         .section {
-          flex: 1; display: flex; align-items: center; justify-content: center;
-          padding: 0 40px 60px; gap: 40px;
+          display: flex; 
+          align-items: center; 
+          justify-content: center;
+          gap: 40px;
         }
 
         /* ── Left panel (Hero mit Bild) ── */
@@ -222,7 +270,7 @@ export default function LoginPage() {
       <div className="page">
         <div className="page-label">Login</div>
 
-        <section className="section">
+        <section className="section" ref={loginBoxRef}>
           {/* Left: Hero mit Bild anstelle von CSS-Farbverlauf */}
           <div className="hero">
             <img 
@@ -281,7 +329,7 @@ export default function LoginPage() {
 
               <Link href="/passwort-vergessen" className="forgot-link">Passwort vergessen?</Link>
 
-              <button type="submit" className="submit-btn" disabled={loading}>
+              <button type="submit" className="submit-btn" disabled={loading|| !isLoaded}>
                 {loading ? <span className="spinner" /> : null}
                 {loading ? 'Anmelden…' : 'Anmelden'}
               </button>
