@@ -13,7 +13,7 @@ public partial class CollectItem
 
     public int? FindingLocationId { get; set; }
 
-    public string? Name { get; set; }
+    public string? SpeciesName { get; set; }
 
     public DateOnly? FindDate { get; set; }
 
@@ -24,6 +24,14 @@ public partial class CollectItem
     public DateTime? CreatedAt { get; set; }
 
     public string? Status { get; set; }
+
+    public string? Sex { get; set; }
+
+    public string? AgeClass { get; set; }
+
+    public decimal? BodyMassGram { get; set; }
+
+    public decimal? BodyLengthMm { get; set; }
 
     public virtual Collection? Collection { get; set; }
 

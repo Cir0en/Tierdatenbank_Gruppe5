@@ -41,4 +41,9 @@ public class GeoMapItemDto
     public string? TaxonomyName { get; set; }
 
     public string? Status { get; set; }
+
+    public string? Sex { get; set; }
+    public string? AgeClass { get; set; }
+    public decimal? BodyMassGram { get; set; }
+    public decimal? BodyLengthMm { get; set; }
 }

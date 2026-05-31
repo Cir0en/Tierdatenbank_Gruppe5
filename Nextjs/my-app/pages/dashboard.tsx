@@ -10,7 +10,7 @@ import { formatDate } from "../utils/date";
 // ── Types ──────────────────────────────────────────────────────────────────
 type NavItem = { id: string; label: string; icon: string; href: string };
 type Specimen = {
-  id: string; name: string; taxon?: string; fundort?: string;
+  id: string; speciesName: string; taxon?: string; fundort?: string;
   datum?: string; findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 }; 
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
