@@ -3,7 +3,7 @@ namespace TodoApi.DTOs;
 
 public class CreateMapAnimalDto
 {
-    public string SpeciesName { get; set; } = null!;
+    public string Name { get; set; } = null!;
     public string? Sex { get; set; }
     public string? AgeClass { get; set; }
     public decimal? BodyMassGram { get; set; }
