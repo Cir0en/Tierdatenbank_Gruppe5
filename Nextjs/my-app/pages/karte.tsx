@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
+import Navbar from '../components/Navbar';
 
 export default function MapPage() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -214,7 +215,9 @@ export default function MapPage() {
   }, []);
 
   return (
-    <main style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh' }}>
+      <Navbar activeNav="karte" />
+      <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
       <style jsx global>{`
@@ -326,6 +329,7 @@ export default function MapPage() {
         }
         .btn-save:hover { background: #0060cc; box-shadow: 0 2px 8px rgba(0,120,255,0.4); }
       `}</style>
-    </main>
+      </main>
+    </div>
   );
 }

@@ -13,7 +13,7 @@ public partial class CollectItem
 
     public int? FindingLocationId { get; set; }
 
-    public string? SpeciesName { get; set; }
+    public string? Name { get; set; }
 
     public DateOnly? FindDate { get; set; }
 
