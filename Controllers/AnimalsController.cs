@@ -46,8 +46,7 @@ namespace TodoApi.Controllers
                     c.Name,
                     c.TaxonomyId,
                     c.FindingLocationId,
-                    c.FindDate
-                ,
+                    c.FindDate,
                     c.CollectionId,
                     Status = c.Status ?? "ausstehend"
                 })
@@ -68,7 +67,7 @@ namespace TodoApi.Controllers
         {
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
-                return BadRequest("SpeciesName Artname fehlt");
+                return BadRequest("Name Artname fehlt");
             }
 
             if (dto.Latitude < -90 || dto.Latitude > 90)
@@ -103,15 +102,26 @@ namespace TodoApi.Controllers
                 }
             }
 
-            var location = new GeoLocation
-            {
-                Name = string.IsNullOrWhiteSpace(dto.LocationName) ? "Unbekannter Fundort" : dto.LocationName,
-                Latitude = dto.Latitude,
-                Longitude = dto.Longitude
-            };
+            var locationName = string.IsNullOrWhiteSpace(dto.LocationName) ? "Unbekannter Fundort" : dto.LocationName;
 
-            _context.GeoLocations.Add(location);
-            await _context.SaveChangesAsync();
+            var location = await _context.GeoLocations
+                .FirstOrDefaultAsync(g =>
+                    g.Name == locationName &&
+                    g.Latitude == dto.Latitude &&
+                    g.Longitude == dto.Longitude);
+
+            if (location == null)
+            {
+                location = new GeoLocation
+                {
+                    Name = locationName,
+                    Latitude = dto.Latitude,
+                    Longitude = dto.Longitude
+                };
+
+                _context.GeoLocations.Add(location);
+                await _context.SaveChangesAsync();
+            }
 
             var item = new CollectItem
             {
@@ -133,6 +143,4 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
         }
     }
-
-
 }
