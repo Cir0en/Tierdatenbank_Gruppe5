@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/router";
 import testdata from '../data/tierdaten.json';
 import { formatDate } from "../utils/date";
 import Navbar from "../components/Navbar";
+import { Map, MapStyle, config, Marker } from '@maptiler/sdk';
+import '@maptiler/sdk/dist/maptiler-sdk.css';
 
 
 
@@ -74,12 +76,11 @@ export default function DashboardPage() {
   const { signOut } = useClerk();
   const router = useRouter();
 
-  // Testlauf für API-Daten
-
   const [MOCK_SPECIMENS, setAnimals] = useState<Specimen[]>([]);
 
+  const miniMapContainer = useRef<HTMLDivElement>(null);
+  const miniMapInstance  = useRef<Map | null>(null);
 
-  
   // Fetch all animals
   useEffect(() => {
     const fetchAnimals = async () => {
@@ -91,7 +92,47 @@ export default function DashboardPage() {
 
     const interval = setInterval(fetchAnimals, 5000);
 
-    return () => clearInterval(interval); // cleanup
+    return () => clearInterval(interval);
+  }, []);
+
+  // Mini-map initialization
+  useEffect(() => {
+    if (!miniMapContainer.current || miniMapInstance.current) return;
+
+    config.apiKey = process.env.NEXT_PUBLIC_MAP_API_KEY as string;
+
+    const map = new Map({
+      container: miniMapContainer.current,
+      style: MapStyle.STREETS,
+      center: [8.0020, 50.9411],
+      zoom: 4,
+      interactive: false,
+    });
+    miniMapInstance.current = map;
+
+    // Datenbankeinträge als Marker in der Vorschau-Karte anzeigen
+    map.on('load', async () => {
+      try {
+        const res = await fetch('http://localhost:5099/api/geolocations/map-items');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const items: { latitude: number; longitude: number }[] = await res.json();
+
+        items.forEach(({ longitude, latitude }) => {
+          new Marker({ color: '#1a73e8' }).setLngLat([longitude, latitude]).addTo(map);
+        });
+      } catch (err) {
+        // Vorschau-Karte bleibt leer, aber das Dashboard funktioniert weiterhin
+        console.error('Kartenvorschau: Marker konnten nicht geladen werden:', err);
+      }
+    });
+
+    return () => {
+      if (miniMapInstance.current) {
+        miniMapInstance.current.remove();
+        miniMapInstance.current = null;
+      }
+    };
   }, []);
 
 
@@ -557,23 +598,8 @@ export default function DashboardPage() {
                     <span className="section-line" />
                     <Link href="/karte" className="card-action">Vollbild ›</Link>
                   </div>
-                  <div className="card">
-                    <div className="map-placeholder" style={{ minHeight: 140 }}>
-                      {/* Grid lines */}
-                      {[20, 40, 60, 80].map((p) => (
-                        <div key={p} className="map-grid-line" style={{ left: `${p}%`, top: 0, bottom: 0, width: 1 }} />
-                      ))}
-                      {[33, 66].map((p) => (
-                        <div key={p} className="map-grid-line" style={{ top: `${p}%`, left: 0, right: 0, height: 1 }} />
-                      ))}
-                      {/* Markers */}
-                      <div className="map-marker" style={{ left: "28%", top: "40%", animationDelay: "0s" }} />
-                      <div className="map-marker" style={{ left: "45%", top: "30%", animationDelay: "0.8s" }} />
-                      <div className="map-marker" style={{ left: "52%", top: "55%", animationDelay: "1.6s" }} />
-                      <div className="map-marker" style={{ left: "70%", top: "38%", animationDelay: "0.4s", background: "var(--amber)" }} />
-                      <div className="map-marker" style={{ left: "35%", top: "65%", animationDelay: "1.2s" }} />
-                      <span className="map-hint">◎ {MOCK_SPECIMENS.filter(s => s.status === "freigegeben").length} Fundorte · Vollständige Karte öffnen</span>
-                    </div>
+                  <div className="card" style={{ overflow: "hidden" }}>
+                    <div ref={miniMapContainer} style={{ width: "100%", height: 160 }} />
                   </div>
                 </div>
 
