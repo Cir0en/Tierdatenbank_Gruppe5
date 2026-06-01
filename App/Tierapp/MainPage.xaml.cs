@@ -14,7 +14,7 @@ public partial class MainPage : ContentPage
 	private readonly ObservableCollection<CollectItemDto> Animals = new();
 
 	// On Android emulator, use 10.0.2.2 to reach the host machine
-	private const string BaseUrl = "http://10.0.2.2:5099/";
+	private const string BaseUrl = "http://localhost:5099/";
 
 	public MainPage()
 	{
@@ -26,6 +26,7 @@ public partial class MainPage : ContentPage
 
 	private async Task LoadAnimalsAsync()
 	{
+		Console.WriteLine("Loading animals from API...");
 		try
 		{
 			using var http = new HttpClient { BaseAddress = new Uri(BaseUrl) };
@@ -37,6 +38,7 @@ public partial class MainPage : ContentPage
 				return;
 			}
 
+
 			var content = await resp.Content.ReadAsStringAsync();
 			Console.WriteLine("API response: " + content);
 
@@ -45,6 +47,7 @@ public partial class MainPage : ContentPage
 			if (items == null)
 			{
 				StatusLabel.Text = "Status: Keine Daten";
+				Console.WriteLine("Deserialized items is null");
 				return;
 			}
 
@@ -66,6 +69,7 @@ public partial class MainPage : ContentPage
 
 	private async void OnRefreshClicked(object? sender, EventArgs e)
 	{
+		Console.WriteLine("Refresh button clicked");
 		await LoadAnimalsAsync();
 	}
 
