@@ -202,14 +202,13 @@ namespace TodoApi.Controllers
             [FromQuery] decimal? east,
             [FromQuery] decimal? north)
         {
+            // Alle Tiere mit gültigen Koordinaten anzeigen, unabhängig von der Sammlung
             var query = _context.CollectItems
                 .AsNoTracking()
                 .Where(i =>
                     i.FindingLocation != null &&
                     i.FindingLocation.Latitude != null &&
-                    i.FindingLocation.Longitude != null &&
-                    i.Collection != null &&
-                    i.Collection.IsPublic == true);
+                    i.FindingLocation.Longitude != null);
 
             if (west.HasValue && south.HasValue && east.HasValue && north.HasValue)
             {

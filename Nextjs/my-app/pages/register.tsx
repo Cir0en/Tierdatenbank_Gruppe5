@@ -25,7 +25,7 @@ export default function RegisterPage() {
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
   const [confirm, setConfirm]     = useState('');
-  const [role, setRole]           = useState('');
+  const [role]                    = useState('nutzer');
   const [agree, setAgree]         = useState(false);
   const [showPw, setShowPw]       = useState(false);
   const [showCf, setShowCf]       = useState(false);
@@ -422,19 +422,13 @@ export default function RegisterPage() {
 
                   {/* Rolle */}
                   <div className="field-wrap">
-                    <label className="field-label">Rolle auswählen</label>
-                    <select
-                      className="field-select"
-                      value={role}
-                      onChange={e => setRole(e.target.value)}
-                      required
-                    >
-                      <option value="">— Rolle wählen —</option>
-                      <option value="nutzer">Nutzer</option>
-                      <option value="forscher">Forscher</option>
-                      <option value="moderator">Moderator</option>
-                      <option value="admin">Administrator</option>
-                    </select>
+                    <label className="field-label">Rolle</label>
+                    <input
+                      type="text"
+                      className="field-input"
+                      value="Nutzer"
+                      readOnly
+                    />
                   </div>
 
                   {/* Agree */}

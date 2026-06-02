@@ -250,7 +250,7 @@ export default function LoginPage() {
           cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.15s;
         }
         .oauth-btn:hover { background: #f9fafb; border-color: #d1d5db; }
-        .oauth-icon { font-size: 16px; }
+        .oauth-icon { width: 18px; height: 18px; }
 
         .switch-text {
           text-align: center; font-size: 13px; color: #6b7280;
@@ -342,19 +342,13 @@ export default function LoginPage() {
             </div>
 
             <div className="oauth-row">
-              <button 
-                type="button" 
-                className="oauth-btn" 
+              <button
+                type="button"
+                className="oauth-btn"
                 onClick={() => handleOAuth('oauth_google')}
               >
-                <span className="oauth-icon">🔵</span> Google
-              </button>
-              <button 
-                type="button" 
-                className="oauth-btn" 
-                onClick={() => handleOAuth('oauth_microsoft')}
-              >
-                <span className="oauth-icon">🟦</span> Microsoft
+                <img src="/google-brands-solid-full.svg" alt="Google" className="oauth-icon" />
+                Google
               </button>
             </div>
 

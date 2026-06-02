@@ -158,21 +158,22 @@ export default function MapPage() {
       });
 
       // Speichern
-      content.querySelector('#btn-save')?.addEventListener('click', () => {
-        const artnameEl    = content.querySelector('#f-artname')    as HTMLInputElement;
-        const altersEl     = content.querySelector('#f-altersklasse') as HTMLSelectElement;
-        const masseEl      = content.querySelector('#f-masse')      as HTMLInputElement;
-        const laengeEl     = content.querySelector('#f-laenge')     as HTMLInputElement;
+      content.querySelector('#btn-save')?.addEventListener('click', async () => {
+        const artnameEl    = content.querySelector('#f-artname')              as HTMLInputElement;
+        const altersEl     = content.querySelector('#f-altersklasse')         as HTMLSelectElement;
+        const masseEl      = content.querySelector('#f-masse')                as HTMLInputElement;
+        const laengeEl     = content.querySelector('#f-laenge')               as HTMLInputElement;
         const geschlechtEl = content.querySelector('input[name="geschlecht"]:checked') as HTMLInputElement;
-        const hintArtname  = content.querySelector('#hint-artname') as HTMLElement;
+        const hintArtname  = content.querySelector('#hint-artname')           as HTMLElement;
+        const btnSave      = content.querySelector('#btn-save')               as HTMLButtonElement;
 
-        const artname     = artnameEl.value.trim();
-        const geschlecht  = geschlechtEl?.value ?? 'Unbekannt';
-        const altersklasse = altersEl.value;
-        const masse       = masseEl.value  ? parseFloat(masseEl.value)  : null;
-        const laenge      = laengeEl.value ? parseFloat(laengeEl.value) : null;
+        const artname      = artnameEl.value.trim();
+        const geschlecht   = geschlechtEl?.value ?? 'Unbekannt';
+        const altersklasse = altersEl.value || null;
+        const masse        = masseEl.value  ? parseFloat(masseEl.value)  : null;
+        const laenge       = laengeEl.value ? parseFloat(laengeEl.value) : null;
 
-        // Validierung: nur Artname ist Pflicht
+        // Validierung: Artname ist Pflichtfeld
         if (!artname) {
           artnameEl.classList.add('input-error');
           hintArtname.style.display = 'block';
@@ -180,17 +181,56 @@ export default function MapPage() {
           return;
         }
 
-        // Marker auf Karte setzen
-        const markerEl = createMarkerElement(artname, geschlecht);
-        new Marker({ element: markerEl })
-          .setLngLat([lng, lat])
-          .addTo(map);
+        // Speichern-Button deaktivieren während der API-Anfrage läuft
+        btnSave.disabled = true;
+        btnSave.textContent = '⏳ Wird gespeichert…';
 
-        popup.remove();
+        // Payload nach CreateMapAnimalDto aufbauen
+        const payload = {
+          name:          artname,
+          sex:           geschlecht === 'Unbekannt' ? null : geschlecht,
+          ageClass:      altersklasse,
+          bodyMassGram:  masse,
+          bodyLengthMm:  laenge,
+          latitude:      lat,
+          longitude:     lng,
+        };
 
-        const data = { artname, geschlecht, altersklasse, masse, laenge, lng, lat };
-        console.log('Gespeichert (lokal):', data);
-        // TODO: fetch('/api/save-marker', { method: 'POST', body: JSON.stringify(data) })
+        try {
+          const res = await fetch('http://localhost:5099/api/animals/map', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            // Fehlertext aus der API-Antwort anzeigen
+            const errText = await res.text();
+            throw new Error(errText || `HTTP ${res.status}`);
+          }
+
+          // Marker wird erst nach erfolgreichem Speichern auf der Karte gesetzt
+          const markerEl = createMarkerElement(artname, geschlecht);
+          new Marker({ element: markerEl })
+            .setLngLat([lng, lat])
+            .addTo(map);
+
+          popup.remove();
+        } catch (err) {
+          // Fehlermeldung direkt im Popup anzeigen, ohne es zu schließen
+          btnSave.disabled = false;
+          btnSave.textContent = '💾 Speichern';
+
+          let errDiv = content.querySelector('#save-error') as HTMLElement | null;
+          if (!errDiv) {
+            errDiv = document.createElement('div');
+            errDiv.id = 'save-error';
+            errDiv.style.cssText =
+              'color:#c5221f;font-size:12px;margin-top:8px;padding:6px 8px;background:#fce8e6;border-radius:4px;';
+            content.querySelector('.form-actions')?.before(errDiv);
+          }
+          errDiv.textContent = `Fehler: ${(err as Error).message}`;
+        }
       });
 
       // Fehlerstatus zurücksetzen beim Tippen
@@ -200,11 +240,36 @@ export default function MapPage() {
       });
     });
 
-    // ── Initialer Beispiel-Marker ────────────────────────────────────────
-    const initialEl = createMarkerElement('Papilio machaon', 'Männlich');
-    new Marker({ element: initialEl })
-      .setLngLat([8.0020, 50.9411])
-      .addTo(map);
+    // ── Tiere aus DB laden und als Marker anzeigen ───────────────────────
+    // map-items verknüpft CollectItems mit GeoLocations über den
+    // Fremdschlüssel FindingLocationId und liefert Tiername + Koordinaten.
+    map.on('load', async () => {
+      try {
+        const res = await fetch('http://localhost:5099/api/geolocations/map-items');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const items: {
+          itemId: number;
+          itemName: string | null;
+          locationName: string;
+          latitude: number;
+          longitude: number;
+          sex: string | null;
+        }[] = await res.json();
+
+        for (const item of items) {
+          // Tiername anzeigen, Fallback auf Ortsnamen wenn kein Name gesetzt
+          const label = item.itemName ?? item.locationName;
+          const el = createMarkerElement(label, item.sex ?? undefined);
+          new Marker({ element: el })
+            .setLngLat([item.longitude, item.latitude])
+            .addTo(map);
+        }
+      } catch (err) {
+        // Karte bleibt nutzbar, auch wenn Marker nicht geladen werden
+        console.error('Marker konnten nicht geladen werden:', err);
+      }
+    });
 
     return () => {
       if (mapInstance.current) {
