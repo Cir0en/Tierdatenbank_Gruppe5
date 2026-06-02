@@ -8,7 +8,7 @@
             Padding="20"
             Spacing="12">
             <Label
-                Text="Tiere (Testseite)"
+                Text="Dashboard"
                 Style="{StaticResource Headline}"
                 SemanticProperties.HeadingLevel="Level1" />
 

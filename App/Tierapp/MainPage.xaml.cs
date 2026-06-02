@@ -14,7 +14,7 @@ public partial class MainPage : ContentPage
 	private readonly ObservableCollection<CollectItemDto> Animals = new();
 
 	// On Android emulator, use 10.0.2.2 to reach the host machine
-	private const string BaseUrl = "http://localhost:5099/";
+	private const string BaseUrl = "http://10.0.2.2:5099/";
 
 	public MainPage()
 	{
