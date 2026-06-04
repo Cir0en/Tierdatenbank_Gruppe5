@@ -5,10 +5,11 @@ using System.Text;
 using System.Text.Json;
 using System.Collections.ObjectModel;
 using Microsoft.Maui.ApplicationModel;
+using Tierapp.DTOs;
 
 namespace Tierapp;
 
-public partial class MainPage : ContentPage
+public partial class Dashboard : ContentPage
 {
 
 	private readonly ObservableCollection<CollectItemDto> Animals = new();
@@ -16,7 +17,7 @@ public partial class MainPage : ContentPage
 	// On Android emulator, use 10.0.2.2 to reach the host machine
 	private const string BaseUrl = "http://10.0.2.2:5099/";
 
-	public MainPage()
+	public Dashboard()
 	{
 		InitializeComponent();
 		AnimalsCollectionView.ItemsSource = Animals;
@@ -73,4 +74,9 @@ public partial class MainPage : ContentPage
 		await LoadAnimalsAsync();
 	}
 
+	private async void OnTierAnlegenClicked(object? sender, EventArgs e)
+	{
+		Console.WriteLine("Tier anlegen button clicked");
+		await Shell.Current.GoToAsync("NewAnimal");
+	}
 }

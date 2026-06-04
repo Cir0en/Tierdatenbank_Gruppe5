@@ -1,4 +1,4 @@
-namespace Tierapp
+namespace Tierapp.DTOs
 {
     public class CollectItemDto
     {

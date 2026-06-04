@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="Tierapp.MainPage">
+             x:Class="Tierapp.Dashboard">
 
     <ScrollView>
         <VerticalStackLayout
@@ -15,12 +15,13 @@
             <HorizontalStackLayout Spacing="8">
                 <Label x:Name="StatusLabel" Text="Status: nicht verbunden" VerticalOptions="Center" />
                 <Button x:Name="RefreshBtn" Text="Refresh" Clicked="OnRefreshClicked" />
+                <Button x:Name="TierAnlegenBtn" Text="Tier anlegen" Clicked="OnTierAnlegenClicked" />
             </HorizontalStackLayout>
 
             <CollectionView x:Name="AnimalsCollectionView" SelectionMode="None">
                 <CollectionView.ItemTemplate>
                     <DataTemplate>
-                        <Frame Margin="0,4" Padding="8" BorderColor="#DDD">
+                        <Frame Margin="0,4" Padding="8" BorderColor="{StaticResource Gray200}">
                             <VerticalStackLayout>
                                 <Label Text="{Binding Name}" FontAttributes="Bold" />
                                 <Label Text="{Binding FindDate}" FontSize="12" />
