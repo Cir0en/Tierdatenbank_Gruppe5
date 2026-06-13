@@ -56,6 +56,12 @@ builder.Services.AddOpenApi();
 builder.Services.Configure<NextjsStaticHostingOptions>(builder.Configuration.GetSection("NextjsStaticHosting"));
 builder.Services.AddNextjsStaticHosting();
 
+builder.Services.AddHttpClient("Gbif", client =>
+{
+    client.BaseAddress = new Uri("https://api.gbif.org/v1/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Collectio/1.0");
+});
+
 var app = builder.Build();
 
 

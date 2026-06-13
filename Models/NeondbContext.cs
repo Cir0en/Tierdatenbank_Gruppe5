@@ -29,6 +29,8 @@ public partial class NeondbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<TaxonomySubmission> TaxonomySubmissions { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder.UseNpgsql("Name=ConnectionStrings:DefaultConnection");
 
@@ -209,6 +211,31 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("taxonomy_parent_id_fkey");
         });
 
+        modelBuilder.Entity<TaxonomySubmission>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("taxonomy_submissions_pkey");
+
+            entity.ToTable("taxonomy_submissions");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+
+            entity.Property(e => e.Reich).HasColumnName("reich");
+            entity.Property(e => e.Stamm).HasColumnName("stamm");
+            entity.Property(e => e.Klasse).HasColumnName("klasse");
+            entity.Property(e => e.Ordnung).HasColumnName("ordnung");
+            entity.Property(e => e.Familie).HasColumnName("familie");
+            entity.Property(e => e.Gattung).HasColumnName("gattung");
+            entity.Property(e => e.Art).HasColumnName("art");
+
+            entity.Property(e => e.Source).HasColumnName("source");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.ModeratorNote).HasColumnName("moderator_note");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.ReviewedAt).HasColumnName("reviewed_at");
+            entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
+        });
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("users_pkey");
@@ -237,6 +264,7 @@ public partial class NeondbContext : DbContext
                 .HasColumnName("role");
             entity.Property(e => e.Username).HasColumnName("username");
         });
+
 
         OnModelCreatingPartial(modelBuilder);
     }

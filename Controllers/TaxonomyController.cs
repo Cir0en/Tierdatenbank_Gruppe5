@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using TodoApi.DTOs;
+using System.Net.Http.Json;
 
 namespace TodoApi.Controllers
 {
@@ -10,10 +11,37 @@ namespace TodoApi.Controllers
     public class TaxonomyController : ControllerBase
     {
         private readonly NeondbContext _context;
+        private readonly IHttpClientFactory _httpClientFactory;
 
-        public TaxonomyController(NeondbContext context)
+        public TaxonomyController(NeondbContext context, IHttpClientFactory httpClientFactory)
         {
             _context = context;
+            _httpClientFactory = httpClientFactory;
+        }
+
+        private static bool HasCompleteAnimalTaxonomy(GbifSpeciesDto gbif)
+        {
+            return !string.IsNullOrWhiteSpace(gbif.Phylum)
+                && !string.IsNullOrWhiteSpace(gbif.ClassName)
+                && !string.IsNullOrWhiteSpace(gbif.Order)
+                && !string.IsNullOrWhiteSpace(gbif.Family)
+                && !string.IsNullOrWhiteSpace(gbif.Genus)
+                && !string.IsNullOrWhiteSpace(gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName);
+        }
+
+        private async Task<Taxonomy> CreateChainFromGbifAsync(GbifSpeciesDto gbif)
+        {
+            if (!HasCompleteAnimalTaxonomy(gbif))
+                throw new InvalidOperationException("GBIF liefert keine vollständige Taxonomie.");
+
+            return await GetOrCreateTaxonomyChainAsync(
+                gbif.Phylum!,
+                gbif.ClassName!,
+                gbif.Order!,
+                gbif.Family!,
+                gbif.Genus!,
+                gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName!
+            );
         }
 
         [HttpGet]
@@ -30,6 +58,59 @@ namespace TodoApi.Controllers
                 })
                 .ToListAsync();
             return Ok(taxonomies);
+        }
+
+        private async Task<Taxonomy> GetOrCreateTaxonomyChainAsync(string stamm,
+                                                                    string klasse,
+                                                                    string ordnung,
+                                                                    string familie,
+                                                                    string gattung,
+                                                                    string art)
+        {
+            var animalia = await _context.Taxonomies
+                .FirstOrDefaultAsync(t => t.Name == "Animalia" && t.Rank == "Reich");
+
+            if (animalia == null)
+                throw new InvalidOperationException("Animalia ist nicht in der Datenbank vorhanden.");
+
+            var chain = new List<(string Rank, string Name)>
+            {
+                ("Stamm", stamm.Trim()),
+                ("Klasse", klasse.Trim()),
+                ("Ordnung", ordnung.Trim()),
+                ("Familie", familie.Trim()),
+                ("Gattung", gattung.Trim()),
+                ("Art", art.Trim())
+            };
+
+            Taxonomy parent = animalia;
+
+            foreach (var item in chain)
+            {
+                var existing = await _context.Taxonomies
+                    .FirstOrDefaultAsync(t =>
+                        t.Name == item.Name &&
+                        t.Rank == item.Rank &&
+                        t.ParentId == parent.Id);
+
+                if (existing == null)
+                {
+                    existing = new Taxonomy
+                    {
+                        Name = item.Name,
+                        Rank = item.Rank,
+                        ParentId = parent.Id,
+                        IsApproved = true
+                    };
+
+                    _context.Taxonomies.Add(existing);
+                    await _context.SaveChangesAsync();
+                }
+
+                parent = existing;
+            }
+
+            return parent;
         }
 
         [HttpGet("{id}")]
@@ -83,5 +164,229 @@ namespace TodoApi.Controllers
                 isApproved = taxonomy.IsApproved
             });
         }
+
+        [HttpPost("gbif")]
+        public async Task<ActionResult<object>> CreateFromGbif(GbifLookupDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.SpeciesName))
+                return BadRequest("Artname ist erforderlich.");
+
+            var client = _httpClientFactory.CreateClient("Gbif");
+
+            var speciesName = dto.SpeciesName.Trim();
+
+            var matchUrl =
+                $"species/match?name={Uri.EscapeDataString(speciesName)}&kingdom=Animalia&rank=SPECIES&verbose=true";
+
+            var gbif = await client.GetFromJsonAsync<GbifSpeciesDto>(matchUrl);
+
+            var isSafeMatch =
+                gbif != null &&
+                gbif.UsageKey.HasValue &&
+                gbif.MatchType != "NONE" &&
+                gbif.Confidence >= 90 &&
+                HasCompleteAnimalTaxonomy(gbif);
+
+            if (isSafeMatch)
+            {
+                var species = await CreateChainFromGbifAsync(gbif!);
+
+                return Ok(new
+                {
+                    status = "created",
+                    taxonomyId = species.Id,
+                    gbifUsageKey = gbif!.UsageKey,
+                    scientificName = gbif.ScientificName,
+                    canonicalName = gbif.CanonicalName
+                });
+            }
+
+            var suggestUrl =
+                $"species/suggest?q={Uri.EscapeDataString(speciesName)}&rank=SPECIES&limit=5";
+
+            var suggestions = await client.GetFromJsonAsync<List<GbifSpeciesDto>>(suggestUrl)
+                ?? new List<GbifSpeciesDto>();
+
+            return Ok(new
+            {
+                status = "needs_confirmation",
+                message = "Keine sichere GBIF-Übereinstimmung gefunden.",
+                input = speciesName,
+                gbifMatch = gbif,
+                suggestions = suggestions.Select(s => new
+                {
+                    usageKey = s.Key ?? s.UsageKey,
+                    s.ScientificName,
+                    s.CanonicalName,
+                    s.Rank,
+                    s.Status,
+                    s.Kingdom,
+                    s.Phylum,
+                    className = s.ClassName,
+                    s.Order,
+                    s.Family,
+                    s.Genus,
+                    s.Species
+                })
+            });
+        }
+
+        [HttpPost("gbif/confirm")]
+        public async Task<ActionResult<object>> ConfirmGbifTaxonomy(ConfirmGbifTaxonomyDto dto)
+        {
+            if (dto.UsageKey <= 0)
+                return BadRequest("GBIF UsageKey ist erforderlich.");
+
+            var client = _httpClientFactory.CreateClient("Gbif");
+
+            var gbif = await client.GetFromJsonAsync<GbifSpeciesDto>($"species/{dto.UsageKey}");
+
+            if (gbif == null)
+                return NotFound("GBIF-Taxon wurde nicht gefunden.");
+
+            if (!string.Equals(gbif.Kingdom, "Animalia", StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Das ausgewählte Taxon gehört nicht zu Animalia.");
+
+            if (!string.Equals(gbif.Rank, "SPECIES", StringComparison.OrdinalIgnoreCase))
+                return BadRequest("Das ausgewählte Taxon ist keine Art.");
+
+            var species = await CreateChainFromGbifAsync(gbif);
+
+            return Ok(new
+            {
+                status = "created",
+                taxonomyId = species.Id,
+                gbifUsageKey = dto.UsageKey,
+                scientificName = gbif.ScientificName,
+                canonicalName = gbif.CanonicalName
+            });
+        }
+
+        [HttpPost("submissions")]
+        public async Task<ActionResult<object>> CreateTaxonomySubmission(CreateTaxonomySubmissionDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Stamm) ||
+                string.IsNullOrWhiteSpace(dto.Klasse) ||
+                string.IsNullOrWhiteSpace(dto.Ordnung) ||
+                string.IsNullOrWhiteSpace(dto.Familie) ||
+                string.IsNullOrWhiteSpace(dto.Gattung) ||
+                string.IsNullOrWhiteSpace(dto.Art))
+            {
+                return BadRequest("Alle Taxonomie-Felder sind erforderlich.");
+            }
+
+            var submission = new TaxonomySubmission
+            {
+                Reich = "Animalia",
+                Stamm = dto.Stamm.Trim(),
+                Klasse = dto.Klasse.Trim(),
+                Ordnung = dto.Ordnung.Trim(),
+                Familie = dto.Familie.Trim(),
+                Gattung = dto.Gattung.Trim(),
+                Art = dto.Art.Trim(),
+                Source = "manual",
+                Status = "pending",
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.TaxonomySubmissions.Add(submission);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                submission.Id,
+                submission.Status,
+                submission.Art
+            });
+        }
+
+        [HttpGet("submissions/pending")] // WICHTIG: später nur über Mod Ansicht aufrufbar! Später anpassen
+        public async Task<ActionResult<object>> GetPendingTaxonomySubmissions()
+        {
+            var submissions = await _context.TaxonomySubmissions
+                .Where(s => s.Status == "pending")
+                .OrderBy(s => s.CreatedAt)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Reich,
+                    s.Stamm,
+                    s.Klasse,
+                    s.Ordnung,
+                    s.Familie,
+                    s.Gattung,
+                    s.Art,
+                    s.Source,
+                    s.Status,
+                    s.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(submissions);
+        }
+
+        [HttpPost("submissions/{id}/approve")] // nach approval in der main Taxonomie Tabelle verfügbar
+        public async Task<ActionResult<object>> ApproveTaxonomySubmission(int id,
+                                                                        ReviewTaxonomySubmissionDto dto)
+        {
+            var submission = await _context.TaxonomySubmissions
+                .FirstOrDefaultAsync(s => s.Id == id);
+
+            if (submission == null)
+                return NotFound();
+
+            if (submission.Status != "pending")
+                return BadRequest("Dieser Vorschlag wurde bereits bearbeitet.");
+
+            var species = await GetOrCreateTaxonomyChainAsync(
+                submission.Stamm,
+                submission.Klasse,
+                submission.Ordnung,
+                submission.Familie,
+                submission.Gattung,
+                submission.Art
+            );
+
+            submission.Status = "approved";
+            submission.ModeratorNote = dto.ModeratorNote;
+            submission.ReviewedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                status = submission.Status,
+                taxonomyId = species.Id,
+                submission.Id
+            });
+        }
+
+        [HttpPost("submissions/{id}/reject")] // abgelehnte bleiben in der Submissions tabelle, 
+                                              // werden nicht zu der main hinzugefügt
+        public async Task<ActionResult<object>> RejectTaxonomySubmission(int id,
+                                                                        ReviewTaxonomySubmissionDto dto)
+        {
+            var submission = await _context.TaxonomySubmissions
+                .FirstOrDefaultAsync(s => s.Id == id);
+
+            if (submission == null)
+                return NotFound();
+
+            if (submission.Status != "pending")
+                return BadRequest("Dieser Vorschlag wurde bereits bearbeitet.");
+
+            submission.Status = "rejected";
+            submission.ModeratorNote = dto.ModeratorNote;
+            submission.ReviewedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                status = submission.Status,
+                submission.Id
+            });
+        }
+
     }
 }
