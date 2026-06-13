@@ -81,7 +81,16 @@ namespace TodoApi.Controllers
                         Id = item.Id,
                         Name = item.Name,
                         FindDate = item.FindDate,
-                        Status = item.Status
+                        Status          = item.Status,
+                        Kategorie       = item.Kategorie,
+                        Lebensraum      = item.Lebensraum,
+                        TaxonomyName    = item.Taxonomy != null ? item.Taxonomy.Name : null,
+                        TaxonomyRank    = item.Taxonomy != null ? item.Taxonomy.Rank : null,
+                        FindingLocation = item.FindingLocation != null ? item.FindingLocation.Name : null,
+                        ImageUrl = item.ObjectImages
+                            .OrderBy(img => img.CreatedAt)
+                            .Select(img => img.ImageUrl)
+                            .FirstOrDefault()
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();
@@ -93,14 +102,14 @@ namespace TodoApi.Controllers
 
 
         [HttpPost]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<ActionResult<CollectionDetailDto>> CreateCollection(CreateCollectionDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
 
             if (currentUser == null)
             {
-                return Unauthorized();
+                return Unauthorized(new { message = "Nutzer nicht gefunden. Bitte melde dich an." });
             }
 
             var collection = new Collection
@@ -131,7 +140,7 @@ namespace TodoApi.Controllers
         }
 
         [HttpPut("{id}")]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<IActionResult> UpdateCollection(int id, UpdateCollectionDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
@@ -163,7 +172,7 @@ namespace TodoApi.Controllers
         }
 
         [HttpDelete("{id}")]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<IActionResult> DeleteCollection(int id)
         {
             var currentUser = await GetCurrentUserAsync();
@@ -193,12 +202,15 @@ namespace TodoApi.Controllers
 
         private async Task<User?> GetCurrentUserAsync()
         {
-            var clerkId = User.FindFirst("sub")?.Value;
+            // Versuche zuerst den Clerk-User-Id Header (für Frontends ohne JWT-Setup)
+            var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
+
+            // Fallback: JWT sub claim
+            if (string.IsNullOrWhiteSpace(clerkId))
+                clerkId = User.FindFirst("sub")?.Value;
 
             if (string.IsNullOrWhiteSpace(clerkId))
-            {
                 return null;
-            }
 
             return await _context.Users
                 .FirstOrDefaultAsync(u => u.ClerkId == clerkId);

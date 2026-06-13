@@ -1,240 +1,129 @@
 'use client';
 
-import { useState, useEffect, memo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useUser, useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
-// ── Typen ─────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
-interface Animal {
+interface Collection {
+  id: number;
+  name: string;
+  description: string | null;
+  isPublic: boolean;
+  itemCount: number;
+  ownerUsername: string | null;
+  isOwner: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+interface CollectionItem {
   id: number;
   name: string | null;
-  status: string | null;
   findDate: string | null;
-  sex: string | null;
-  ageClass: string | null;
-  description: string | null;
-  bodyMassGram: number | null;
-  bodyLengthMm: number | null;
+  status: string | null;
+  taxonomyName: string | null;
+  taxonomyRank: string | null;
+  findingLocation: string | null;
+  kategorie: string | null;
+  lebensraum: string | null;
+  imageUrl: string | null;
 }
 
-interface NewAnimalForm {
-  name: string;
-  description: string;
-  findDate: string;
-  sex: string;
-  ageClass: string;
-  bodyMassGram: string;
-  bodyLengthMm: string;
+const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
+const KATEGORIE_OPTIONS  = ['Insekten', 'Säugetiere', 'Vögel', 'Amphibien', 'Reptilien', 'Fische', 'Spinnentiere', 'Schnecken', 'Sonstige'];
+
+interface CollectionDetail extends Collection {
+  items: CollectionItem[];
 }
 
-const FORM_INITIAL: NewAnimalForm = {
-  name: '',
-  description: '',
-  findDate: '',
-  sex: 'Unbekannt',
-  ageClass: '',
-  bodyMassGram: '',
-  bodyLengthMm: '',
-};
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-// ── Hilfsfunktion: Status → CSS-Klasse ────────────────────────────────────────
-
-function badgeClass(status: string | null): string {
+function statusBadge(status: string | null) {
   switch ((status ?? '').toLowerCase()) {
-    case 'ausstehend': return 'badge-ausstehend';
-    case 'aktiv':      return 'badge-aktiv';
-    case 'archiviert': return 'badge-archiviert';
-    default:           return 'badge-default';
+    case 'häufig':
+    case 'ungefährdet':  return { bg: '#d1fae5', color: '#065f46' };
+    case 'selten':       return { bg: '#fef3c7', color: '#92400e' };
+    case 'sehr selten':  return { bg: '#ffedd5', color: '#9a3412' };
+    case 'wichtig':      return { bg: '#e0e7ff', color: '#3730a3' };
+    case 'geschützt':    return { bg: '#fee2e2', color: '#991b1b' };
+    case 'stark gefährdet': return { bg: '#fce7f3', color: '#9d174d' };
+    default:             return { bg: '#f3f4f6', color: '#374151' };
   }
 }
 
-// ── AnimalCard: memo verhindert Re-Render wenn die Liste sich nicht ändert ────
+// ── Create Modal ───────────────────────────────────────────────────────────────
 
-const AnimalCard = memo(function AnimalCard({ animal }: { animal: Animal }) {
-  return (
-    <div className="animal-card">
-      <div className="card-id">#{animal.id}</div>
-      <div className="card-title">{animal.name ?? '—'}</div>
-      {animal.description  && <div className="card-detail">{animal.description}</div>}
-      {animal.findDate     && <div className="card-detail">Funddatum: {animal.findDate}</div>}
-      {animal.sex          && <div className="card-detail">Geschlecht: {animal.sex}</div>}
-      {animal.ageClass     && <div className="card-detail">Altersklasse: {animal.ageClass}</div>}
-      {animal.bodyLengthMm && <div className="card-detail">Länge: {animal.bodyLengthMm} mm</div>}
-      {animal.bodyMassGram && <div className="card-detail">Gewicht: {animal.bodyMassGram} g</div>}
-      <span className={`badge ${badgeClass(animal.status)}`}>
-        {animal.status ?? 'Unbekannt'}
-      </span>
-    </div>
-  );
-});
-
-// ── AnimalModal: eigener State-Scope → Re-Renders bleiben im Modal ─────────────
-// Eltern-Component (SammlungPage) wird bei Formularänderungen NICHT neu gerendert.
-
-interface ModalProps {
+function CreateModal({ onClose, onSaved, clerkUserId }: {
   onClose: () => void;
   onSaved: () => void;
-}
-
-function AnimalModal({ onClose, onSaved }: ModalProps) {
-  const [form, setForm]       = useState<NewAnimalForm>(FORM_INITIAL);
-  const [saving, setSaving]   = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const setField = (field: keyof NewAnimalForm, value: string) =>
-    setForm((prev) => ({ ...prev, [field]: value }));
+  clerkUserId: string | null;
+}) {
+  const [name, setName]         = useState('');
+  const [description, setDesc]  = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
-      setSaveError('Bitte einen Artnamen eingeben.');
-      return;
-    }
-
+    if (!name.trim()) { setError('Bitte einen Namen eingeben.'); return; }
+    if (!clerkUserId) { setError('Du musst eingeloggt sein.'); return; }
     setSaving(true);
-    setSaveError(null);
-
-    const payload = {
-      name:         form.name.trim(),
-      description:  form.description.trim() || null,
-      findDate:     form.findDate || null,
-      sex:          form.sex === 'Unbekannt' ? null : form.sex,
-      ageClass:     form.ageClass || null,
-      bodyMassGram: form.bodyMassGram ? parseFloat(form.bodyMassGram) : null,
-      bodyLengthMm: form.bodyLengthMm ? parseFloat(form.bodyLengthMm) : null,
-      status:       'ausstehend',
-    };
-
+    setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/animals', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
+      const res = await fetch('http://localhost:5099/api/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
+        body: JSON.stringify({ name: name.trim(), description: description.trim() || null, isPublic }),
       });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText || `HTTP ${res.status}`);
-      }
-
-      onSaved(); // Liste in der Eltern-Komponente neu laden
-    } catch (err) {
-      setSaveError((err as Error).message);
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
       setSaving(false);
     }
   };
 
   return (
     <div className="modal-overlay" onClick={saving ? undefined : onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">🐾 Neues Tier erfassen</div>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">📂 Neue Sammlung anlegen</div>
+        {error && <div className="modal-error">{error}</div>}
 
-        {saveError && <div className="modal-error">{saveError}</div>}
-
-        {/* Artname – Pflichtfeld */}
         <div className="form-group">
-          <label className="form-label">
-            Artname <span className="required">*</span>
-          </label>
-          <input
-            type="text"
-            className={`form-input${!form.name && saveError ? ' input-error' : ''}`}
-            placeholder="z. B. Papilio machaon"
-            value={form.name}
-            onChange={(e) => setField('name', e.target.value)}
-          />
+          <label className="form-label">Name <span className="required">*</span></label>
+          <input type="text" className="form-input" autoFocus
+            placeholder="z. B. Schmetterlinge NRW"
+            value={name} onChange={e => setName(e.target.value)} />
         </div>
 
-        {/* Beschreibung */}
         <div className="form-group">
           <label className="form-label">Beschreibung</label>
-          <textarea
-            className="form-textarea"
-            placeholder="Kurze Beschreibung des Fundes…"
-            value={form.description}
-            onChange={(e) => setField('description', e.target.value)}
-          />
+          <textarea className="form-textarea"
+            placeholder="Kurze Beschreibung der Sammlung…"
+            value={description} onChange={e => setDesc(e.target.value)} />
         </div>
 
-        {/* Funddatum */}
         <div className="form-group">
-          <label className="form-label">Funddatum</label>
-          <input
-            type="date"
-            className="form-input"
-            value={form.findDate}
-            onChange={(e) => setField('findDate', e.target.value)}
-          />
-        </div>
-
-        {/* Geschlecht: native radio inputs für sofortige Reaktion ohne Re-Render der Seite */}
-        <div className="form-group">
-          <label className="form-label">Geschlecht</label>
-          <div className="radio-group">
-            {(['Männlich', 'Weiblich', 'Unbekannt'] as const).map((g) => (
-              <label key={g} className="radio-label">
-                <input
-                  type="radio"
-                  name="sex"
-                  value={g}
-                  checked={form.sex === g}
-                  onChange={() => setField('sex', g)}
-                />
-                {g === 'Männlich' ? '♂ Männlich' : g === 'Weiblich' ? '♀ Weiblich' : '◉ Unbekannt'}
-              </label>
-            ))}
+          <label className="form-label">Sichtbarkeit</label>
+          <div className="visibility-toggle">
+            <button type="button"
+              className={`vis-btn${isPublic ? ' vis-active-public' : ''}`}
+              onClick={() => setIsPublic(true)}>🌍 Öffentlich</button>
+            <button type="button"
+              className={`vis-btn${!isPublic ? ' vis-active-private' : ''}`}
+              onClick={() => setIsPublic(false)}>🔒 Privat</button>
           </div>
-        </div>
-
-        {/* Altersklasse */}
-        <div className="form-group">
-          <label className="form-label">Altersklasse</label>
-          <select
-            className="form-select"
-            value={form.ageClass}
-            onChange={(e) => setField('ageClass', e.target.value)}
-          >
-            <option value="">— nicht angegeben —</option>
-            <option value="Juvenile">Juvenil (Jungtier)</option>
-            <option value="Subadult">Subadult</option>
-            <option value="Adult">Adult (Erwachsen)</option>
-            <option value="Senior">Senior</option>
-          </select>
-        </div>
-
-        {/* Körpermasse + Körperlänge nebeneinander */}
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">Körpermasse</label>
-            <div className="input-unit-wrap">
-              <input
-                type="number" min="0" step="0.01" placeholder="0.00"
-                className="form-input input-unit"
-                value={form.bodyMassGram}
-                onChange={(e) => setField('bodyMassGram', e.target.value)}
-              />
-              <span className="unit-label">g</span>
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Körperlänge</label>
-            <div className="input-unit-wrap">
-              <input
-                type="number" min="0" step="0.1" placeholder="0.0"
-                className="form-input input-unit"
-                value={form.bodyLengthMm}
-                onChange={(e) => setField('bodyLengthMm', e.target.value)}
-              />
-              <span className="unit-label">mm</span>
-            </div>
-          </div>
+          <p className="vis-hint">
+            {isPublic ? 'Alle Nutzer können diese Sammlung sehen.' : 'Nur du siehst diese Sammlung.'}
+          </p>
         </div>
 
         <div className="modal-actions">
-          <button className="btn-cancel" disabled={saving} onClick={onClose}>
-            Abbrechen
-          </button>
-          <button className="btn-save" disabled={saving} onClick={handleSave}>
-            {saving ? '⏳ Wird gespeichert…' : '💾 Speichern'}
+          <button className="btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
+          <button className="btn-save"   disabled={saving} onClick={handleSave}>
+            {saving ? '⏳ Wird erstellt…' : '✓ Erstellen'}
           </button>
         </div>
       </div>
@@ -242,235 +131,914 @@ function AnimalModal({ onClose, onSaved }: ModalProps) {
   );
 }
 
-// ── Haupt-Komponente ───────────────────────────────────────────────────────────
-// Verwaltet nur: Tierliste, Suchbegriff und ob das Modal offen ist.
-// Formular-State lebt komplett in AnimalModal.
+// ── Collection Card ────────────────────────────────────────────────────────────
 
-export default function SammlungPage() {
-  const [animals, setAnimals]       = useState<Animal[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState<string | null>(null);
-  const [showModal, setShowModal]   = useState(false);
+function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
+  col: Collection;
+  clerkUserId: string | null;
+  onOpen: (id: number) => void;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
 
-  const loadAnimals = useCallback(() => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Sammlung „${col.name}" wirklich löschen?`)) return;
+    setDeleting(true);
+    try {
+      await fetch(`http://localhost:5099/api/collections/${col.id}`, {
+        method: 'DELETE',
+        headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
+      });
+      onDeleted();
+    } catch { setDeleting(false); }
+  };
+
+  return (
+    <div className="col-card" onClick={() => onOpen(col.id)}>
+      <div className={`col-card-stripe ${col.isPublic ? 'stripe-public' : 'stripe-private'}`} />
+      <div className="col-card-body">
+        <div className="col-card-top">
+          <div className="col-card-name">{col.name}</div>
+          <span className={`col-badge ${col.isPublic ? 'badge-public' : 'badge-private'}`}>
+            {col.isPublic ? '🌍 Öffentlich' : '🔒 Privat'}
+          </span>
+        </div>
+        {col.description && <div className="col-card-desc">{col.description}</div>}
+        <div className="col-card-meta">
+          <span className="col-meta-item">🐾 {col.itemCount} Einträge</span>
+          {col.ownerUsername && <span className="col-meta-item">👤 {col.ownerUsername}</span>}
+        </div>
+        {col.canDelete && (
+          <button className="col-delete-btn" disabled={deleting}
+            onClick={handleDelete} title="Sammlung löschen">
+            {deleting ? '…' : '🗑'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Animal Image Modal ────────────────────────────────────────────────────────
+
+const API = 'http://localhost:5099';
+
+interface AnimalImage { id: number; imageUrl: string; createdAt: string | null; }
+
+function AnimalImageModal({ animal, onClose }: {
+  animal: CollectionItem;
+  onClose: () => void;
+}) {
+  const [image, setImage]         = useState<AnimalImage | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+
+  const loadImage = useCallback(async () => {
     setLoading(true);
-    fetch('http://localhost:5099/api/animals')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: Animal[]) => { setAnimals(data); setLoading(false); })
-      .catch((err) => { setError(err.message); setLoading(false); });
+    try {
+      const res = await fetch(`${API}/api/images/${animal.id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const list: AnimalImage[] = await res.json();
+      setImage(list[0] ?? null);
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [animal.id]);
+
+  useEffect(() => { loadImage(); }, [loadImage]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API}/api/images/upload/${animal.id}`, { method: 'POST', body: fd });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      await loadImage();
+    } catch (e: any) { setError(e.message); }
+    finally { setUploading(false); e.target.value = ''; }
+  };
+
+  const handleDelete = async () => {
+    if (!image || !confirm('Foto löschen?')) return;
+    try {
+      await fetch(`${API}/api/images/${image.id}`, { method: 'DELETE' });
+      setImage(null);
+    } catch (e: any) { setError(e.message); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">📷 Foto — {animal.name ?? `Tier #${animal.id}`}</div>
+        {error && <div className="modal-error">{error}</div>}
+
+        {loading ? (
+          <div className="img-loading">Wird geladen…</div>
+        ) : image ? (
+          <div className="img-single-wrap">
+            <img src={`${API}${image.imageUrl}`} alt="" className="img-single" />
+            <div className="img-single-actions">
+              <label className="img-upload-btn img-upload-btn-sm">
+                🔄 Foto ersetzen
+                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp"
+                  style={{ display: 'none' }} disabled={uploading} onChange={handleUpload} />
+              </label>
+              <button className="img-delete-full-btn" onClick={handleDelete}>🗑 Löschen</button>
+            </div>
+          </div>
+        ) : (
+          <div className="img-empty">
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📷</div>
+            Noch kein Foto vorhanden.
+            <div style={{ marginTop: 16 }}>
+              <label className="img-upload-btn">
+                {uploading ? '⏳ Wird hochgeladen…' : '+ Foto hochladen'}
+                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp"
+                  style={{ display: 'none' }} disabled={uploading} onChange={handleUpload} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>Schließen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Add Animal Modal ──────────────────────────────────────────────────────────
+
+interface TaxonomyOption { id: number; name: string; rank: string | null; }
+
+function AddAnimalModal({ collectionId, onClose, onSaved }: {
+  collectionId: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName]             = useState('');
+  const [description, setDesc]      = useState('');
+  const [findDate, setFindDate]     = useState('');
+  const [sex, setSex]               = useState('Unbekannt');
+  const [ageClass, setAgeClass]     = useState('');
+  const [bodyMass, setBodyMass]     = useState('');
+  const [bodyLen, setBodyLen]       = useState('');
+  const [taxonomyId, setTaxonomyId] = useState('');
+  const [kategorie, setKategorie]   = useState('');
+  const [lebensraum, setLebensraum] = useState('');
+  const [seltenheit, setSeltenheit] = useState('');
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+  const [taxonomies, setTaxonomies] = useState<TaxonomyOption[]>([]);
+
+  useEffect(() => {
+    fetch('http://localhost:5099/api/taxonomy')
+      .then(r => r.ok ? r.json() : [])
+      .then(setTaxonomies)
+      .catch(() => {});
   }, []);
 
-  useEffect(() => { loadAnimals(); }, [loadAnimals]);
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Bitte einen Artnamen eingeben.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch('http://localhost:5099/api/animals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name:         name.trim(),
+          description:  description.trim() || null,
+          findDate:     findDate || null,
+          sex:          sex === 'Unbekannt' ? null : sex,
+          ageClass:     ageClass || null,
+          bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
+          bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
+          taxonomyId:   taxonomyId ? parseInt(taxonomyId) : null,
+          kategorie:    kategorie || null,
+          lebensraum:   lebensraum.trim() || null,
+          status:       seltenheit || null,
+          collectionId,
+        }),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
 
-  // Nach erfolgreichem Speichern: Modal schließen + Liste neu laden
-  const handleSaved = useCallback(() => {
-    setShowModal(false);
-    loadAnimals();
-  }, [loadAnimals]);
+  return (
+    <div className="modal-overlay" onClick={saving ? undefined : onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">🐾 Neues Tier hinzufügen</div>
+        {error && <div className="modal-error">{error}</div>}
 
-  const filtered = animals.filter((a) =>
-    (a.name ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (a.status ?? '').toLowerCase().includes(searchTerm.toLowerCase())
+        <div className="form-group">
+          <label className="form-label">Artname <span className="required">*</span></label>
+          <input type="text" className="form-input" autoFocus
+            placeholder="z. B. Parnassius apollo"
+            value={name} onChange={e => setName(e.target.value)} />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Beschreibung</label>
+          <textarea className="form-textarea" placeholder="Kurze Beschreibung…"
+            value={description} onChange={e => setDesc(e.target.value)} />
+        </div>
+
+        <div className="form-row-2">
+          <div className="form-group">
+            <label className="form-label">Tier-Kategorie</label>
+            <select className="form-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
+              <option value="">— nicht angegeben —</option>
+              {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Seltenheit</label>
+            <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+              <option value="">— nicht angegeben —</option>
+              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Lebensraum</label>
+          <input type="text" className="form-input"
+            placeholder="z. B. Alpine Wiesen, Berghänge"
+            value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+        </div>
+
+        <div className="form-row-2">
+          <div className="form-group">
+            <label className="form-label">Funddatum</label>
+            <input type="date" className="form-input"
+              value={findDate} onChange={e => setFindDate(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Wissenschaftlicher Name (Taxonomie)</label>
+            <select className="form-select" value={taxonomyId} onChange={e => setTaxonomyId(e.target.value)}>
+              <option value="">— keine —</option>
+              {taxonomies.map(t => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.rank ? `[${t.rank}] ` : ''}{t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Geschlecht</label>
+          <div className="radio-group">
+            {(['Männlich', 'Weiblich', 'Unbekannt'] as const).map(g => (
+              <label key={g} className={`radio-label${sex === g ? ' radio-checked' : ''}`}>
+                <input type="radio" name="sex-modal" value={g}
+                  checked={sex === g} onChange={() => setSex(g)} style={{ display: 'none' }} />
+                {g === 'Männlich' ? '♂ Männlich' : g === 'Weiblich' ? '♀ Weiblich' : '◉ Unbekannt'}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-row-2">
+          <div className="form-group">
+            <label className="form-label">Altersklasse</label>
+            <select className="form-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
+              <option value="">— nicht angegeben —</option>
+              <option value="Juvenile">Juvenil</option>
+              <option value="Subadult">Subadult</option>
+              <option value="Adult">Adult</option>
+              <option value="Senior">Senior</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Körpermasse (g)</label>
+            <input type="number" min="0" step="0.01" className="form-input"
+              placeholder="0.00" value={bodyMass} onChange={e => setBodyMass(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Körperlänge (mm)</label>
+            <input type="number" min="0" step="0.1" className="form-input"
+              placeholder="0.0" value={bodyLen} onChange={e => setBodyLen(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
+          <button className="btn-save"   disabled={saving} onClick={handleSave}>
+            {saving ? '⏳ Wird gespeichert…' : '+ Tier hinzufügen'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
+}
+
+// ── Collection Detail View ─────────────────────────────────────────────────────
+
+function CollectionDetailView({ detail, onBack, onAnimalAdded, onImageChanged, isSignedIn }: {
+  detail: CollectionDetail;
+  onBack: () => void;
+  onAnimalAdded: () => void;
+  onImageChanged: () => void;
+  isSignedIn?: boolean;
+}) {
+  const [showAddModal, setShowAddModal]       = useState(false);
+  const [imageAnimal, setImageAnimal]         = useState<CollectionItem | null>(null);
+
+  return (
+    <div>
+      {/* Back + header */}
+      <div className="detail-header">
+        <button className="back-btn" onClick={onBack}>← Zurück</button>
+        <div className="detail-header-info">
+          <div className="detail-title-row">
+            <div className="detail-title">{detail.name}</div>
+            {isSignedIn && (
+              <button className="btn-add-animal" onClick={() => setShowAddModal(true)}>
+                + Tier hinzufügen
+              </button>
+            )}
+          </div>
+          <div className="detail-meta-row">
+            <span className={`col-badge ${detail.isPublic ? 'badge-public' : 'badge-private'}`}>
+              {detail.isPublic ? '🌍 Öffentlich' : '🔒 Privat'}
+            </span>
+            {detail.ownerUsername && (
+              <span className="detail-owner">👤 {detail.ownerUsername}</span>
+            )}
+            <span className="detail-count">{detail.items.length} Einträge</span>
+          </div>
+          {detail.description && (
+            <div className="detail-desc">{detail.description}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Animal Cards */}
+      {detail.items.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">🐾</div>
+          Diese Sammlung enthält noch keine Einträge.<br />
+          Klicke auf „+ Tier hinzufügen".
+        </div>
+      ) : (
+        <div className="animal-card-grid">
+          {detail.items.map(item => {
+            const badge = statusBadge(item.status);
+            return (
+              <div key={item.id} className="animal-card">
+                {/* Foto */}
+                <div className="animal-card-img-wrap" onClick={() => setImageAnimal(item)}>
+                  {item.imageUrl ? (
+                    <img src={`${API}${item.imageUrl}`} alt={item.name ?? ''} className="animal-card-img" />
+                  ) : (
+                    <div className="animal-card-img-placeholder">
+                      <span>📷</span>
+                      <span className="animal-card-img-hint">Foto hochladen</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Info */}
+                <div className="animal-card-body">
+                  <div className="animal-card-name">{item.name ?? `Eintrag #${item.id}`}</div>
+
+                  {item.taxonomyName && (
+                    <div className="animal-card-scientific">{item.taxonomyName}</div>
+                  )}
+
+                  <div className="animal-card-meta">
+                    {(item.kategorie || item.taxonomyRank) && (
+                      <span className="animal-card-cat">
+                        {item.kategorie ?? item.taxonomyRank}
+                      </span>
+                    )}
+                    {item.lebensraum && (
+                      <span className="animal-card-cat">{item.lebensraum}</span>
+                    )}
+                    {item.findingLocation && (
+                      <span className="animal-card-loc">📍 {item.findingLocation}</span>
+                    )}
+                  </div>
+
+                  {item.status && (
+                    <span className="animal-card-badge"
+                      style={{ background: badge.bg, color: badge.color }}>
+                      {item.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showAddModal && (
+        <AddAnimalModal
+          collectionId={detail.id}
+          onClose={() => setShowAddModal(false)}
+          onSaved={() => { setShowAddModal(false); onAnimalAdded(); }}
+        />
+      )}
+
+      {imageAnimal && (
+        <AnimalImageModal
+          animal={imageAnimal}
+          onClose={() => { setImageAnimal(null); onImageChanged(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────────
+
+type Tab = 'public' | 'mine';
+
+export default function SammlungPage() {
+  const { user } = useUser();
+  const { isSignedIn } = useAuth();
+  const clerkUserId = user?.id ?? null;
+
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState<string | null>(null);
+  const [tab, setTab]                 = useState<Tab>('public');
+  const [showModal, setShowModal]     = useState(false);
+  const [search, setSearch]           = useState('');
+
+  // Detail view
+  const [detail, setDetail]           = useState<CollectionDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('http://localhost:5099/api/collections', {
+        headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setCollections(await res.json());
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [clerkUserId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openCollection = async (id: number) => {
+    setDetailLoading(true);
+    setDetail(null);
+    try {
+      const res = await fetch(`http://localhost:5099/api/collections/${id}`, {
+        headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDetail(await res.json());
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleSaved = () => { setShowModal(false); load(); };
+
+  const publicCols = collections.filter(c =>
+    c.isPublic && (search === '' || c.name.toLowerCase().includes(search.toLowerCase()))
+  );
+  const mineCols = collections.filter(c =>
+    c.isOwner && (search === '' || c.name.toLowerCase().includes(search.toLowerCase()))
+  );
+  const myPrivate = mineCols.filter(c => !c.isPublic);
+  const myPublic  = mineCols.filter(c =>  c.isPublic);
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #f8f9fa; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; color: #202124; }
 
         .app-layout   { display: flex; height: 100vh; overflow: hidden; }
         .main-content { flex: 1; background: #fff; padding: 40px; display: flex; flex-direction: column; overflow-y: auto; }
 
-        .header      { margin-bottom: 32px; }
-        .breadcrumbs { font-size: 12px; font-weight: 500; color: #70757a; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
-        .page-title  { font-size: 28px; font-weight: 500; color: #202124; letter-spacing: -0.02em; }
+        .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; gap: 16px; }
+        .page-title  { font-size: 26px; font-weight: 600; color: #1a2f1a; letter-spacing: -0.02em; }
+        .page-sub    { font-size: 13px; color: #6b7280; margin-top: 4px; }
 
-        .toolbar     { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
-        .search-wrap { position: relative; width: min(400px, 100%); }
-        .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #70757a; pointer-events: none; }
+        .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+        .search-wrap { position: relative; flex: 1; max-width: 360px; }
+        .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 15px; color: #9ca3af; pointer-events: none; }
         .search-input {
-          width: 100%; background: #fff; border: 1px solid #dadce0; border-radius: 6px;
-          padding: 12px 15px 12px 40px; font-family: inherit; font-size: 14px; color: #202124;
-          outline: none; transition: border-color .2s, box-shadow .2s;
-        }
-        .search-input:focus        { border-color: #1a73e8; box-shadow: 0 0 0 1px #1a73e8; }
-        .search-input::placeholder { color: #70757a; }
-
-        .btn-add {
-          white-space: nowrap; padding: 0 20px; height: 44px;
-          background: #1a73e8; color: #fff; border: none; border-radius: 6px;
-          font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
-          transition: background .2s;
-        }
-        .btn-add:hover { background: #1558b0; }
-
-        .animal-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-          gap: 20px;
-          margin-bottom: 40px;
-        }
-
-        .animal-card {
-          border: 1px solid #dadce0; border-radius: 8px; padding: 20px;
-          background: #fff; transition: box-shadow .2s ease, transform .2s ease;
-          display: flex; flex-direction: column; gap: 6px;
-        }
-        .animal-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); transform: translateY(-2px); }
-
-        .card-id     { font-size: 11px; color: #80868b; }
-        .card-title  { font-size: 16px; font-weight: 600; color: #202124; }
-        .card-detail { font-size: 13px; color: #5f6368; }
-
-        .badge            { display: inline-block; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; margin-top: 6px; }
-        .badge-ausstehend { background: #fef7e0; color: #b06000; }
-        .badge-aktiv      { background: #e6f4ea; color: #137333; }
-        .badge-archiviert { background: #f1f3f4; color: #5f6368; }
-        .badge-default    { background: #e8f0fe; color: #1a73e8; }
-
-        .status-message { text-align: center; padding: 48px; color: #70757a; font-size: 15px; }
-        .error-message  { text-align: center; padding: 48px; color: #c5221f; font-size: 15px; border: 1px dashed #f28b82; border-radius: 8px; }
-        .empty-state    { grid-column: 1 / -1; text-align: center; padding: 48px; color: #70757a; border: 1px dashed #dadce0; border-radius: 8px; }
-
-        /* ── Modal ── */
-        .modal-overlay {
-          position: fixed; inset: 0; background: rgba(0,0,0,.4);
-          display: flex; align-items: center; justify-content: center; z-index: 1000;
-        }
-        .modal {
-          background: #fff; border-radius: 12px; padding: 28px;
-          width: min(480px, 90vw); max-height: 90vh; overflow-y: auto;
-          box-shadow: 0 8px 30px rgba(0,0,0,.2);
-        }
-        .modal-title {
-          font-size: 18px; font-weight: 600; color: #202124;
-          margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid #e0e0e0;
-        }
-
-        .form-group { margin-bottom: 14px; }
-        .form-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-        .form-row .form-group { margin-bottom: 0; }
-
-        .form-label {
-          display: block; font-size: 11px; font-weight: 600; color: #5f6368;
-          text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px;
-        }
-        .required { color: #ea4335; }
-
-        .form-input, .form-select, .form-textarea {
-          width: 100%; padding: 9px 11px; border-radius: 6px;
-          border: 1px solid #dadce0; font-size: 13px; color: #202124;
-          font-family: inherit; outline: none;
+          width: 100%; padding: 10px 14px 10px 38px; border: 1px solid #e5e7eb; border-radius: 8px;
+          font-family: inherit; font-size: 14px; color: #202124; outline: none;
           transition: border-color .2s, box-shadow .2s;
         }
-        .form-input:focus, .form-select:focus, .form-textarea:focus {
-          border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,.1);
+        .search-input:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+        .search-input::placeholder { color: #9ca3af; }
+
+        .btn-new {
+          white-space: nowrap; padding: 10px 18px; background: #2d6a4f; color: #fff;
+          border: none; border-radius: 8px; font-size: 13px; font-weight: 600;
+          cursor: pointer; font-family: inherit; transition: background .15s;
         }
-        .form-input.input-error { border-color: #ea4335; }
-        .form-textarea { resize: vertical; min-height: 68px; }
-        .form-select   { cursor: pointer; }
+        .btn-new:hover { background: #1b4332; }
 
-        .input-unit-wrap { position: relative; display: flex; align-items: center; }
-        .input-unit      { padding-right: 30px !important; }
-        .unit-label      { position: absolute; right: 10px; font-size: 11px; color: #9aa0a6; pointer-events: none; }
+        .tabs { display: flex; gap: 2px; margin-bottom: 28px; border-bottom: 2px solid #e5e7eb; }
+        .tab-btn {
+          padding: 10px 20px; background: none; border: none; font-family: inherit;
+          font-size: 14px; font-weight: 500; color: #6b7280; cursor: pointer;
+          border-bottom: 2px solid transparent; margin-bottom: -2px;
+          transition: color .15s, border-color .15s;
+        }
+        .tab-btn:hover { color: #2d6a4f; }
+        .tab-btn.tab-active { color: #2d6a4f; border-bottom-color: #2d6a4f; font-weight: 600; }
+        .tab-count {
+          display: inline-block; background: #f3f4f6; color: #6b7280;
+          font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 99px; margin-left: 6px;
+        }
+        .tab-active .tab-count { background: #d1fae5; color: #065f46; }
 
-        /* Native radio inputs mit custom Styling */
+        .section-header {
+          display: flex; align-items: center; gap: 10px;
+          font-size: 13px; font-weight: 600; color: #374151;
+          margin-bottom: 14px; margin-top: 24px;
+        }
+        .section-header:first-child { margin-top: 0; }
+        .section-line { flex: 1; height: 1px; background: #e5e7eb; }
+
+        .col-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+
+        .col-card {
+          display: flex; border-radius: 12px; border: 1.5px solid #e5e7eb;
+          background: #fff; overflow: hidden; cursor: pointer;
+          transition: box-shadow .2s, transform .2s; position: relative;
+        }
+        .col-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.09); transform: translateY(-2px); }
+
+        .col-card-stripe { width: 5px; flex-shrink: 0; }
+        .stripe-public  { background: #2d6a4f; }
+        .stripe-private { background: #6366f1; }
+
+        .col-card-body { flex: 1; padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+        .col-card-top  { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+        .col-card-name { font-size: 15px; font-weight: 600; color: #1a1a1a; line-height: 1.3; flex: 1; }
+
+        .col-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; flex-shrink: 0; }
+        .badge-public  { background: #d1fae5; color: #065f46; }
+        .badge-private { background: #ede9fe; color: #5b21b6; }
+
+        .col-card-desc { font-size: 12px; color: #6b7280; line-height: 1.5; }
+        .col-card-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+        .col-meta-item { font-size: 11px; color: #9ca3af; }
+
+        .col-delete-btn {
+          position: absolute; top: 10px; right: 10px;
+          background: none; border: none; cursor: pointer; font-size: 15px;
+          opacity: 0; transition: opacity .15s; padding: 2px 4px; border-radius: 4px;
+        }
+        .col-card:hover .col-delete-btn { opacity: 1; }
+        .col-delete-btn:hover { background: #fee2e2; }
+
+        /* ── Detail view ── */
+        .detail-header {
+          display: flex; align-items: flex-start; gap: 16px; margin-bottom: 28px;
+        }
+        .back-btn {
+          display: flex; align-items: center; gap: 6px; white-space: nowrap;
+          background: #f0fdf4; border: 1.5px solid #a7f3d0; border-radius: 8px;
+          padding: 8px 14px; font-size: 13px; font-weight: 500; color: #065f46;
+          cursor: pointer; font-family: inherit; transition: background .15s; flex-shrink: 0;
+        }
+        .back-btn:hover { background: #dcfce7; }
+        .detail-header-info { flex: 1; }
+        .detail-title { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 8px; }
+        .detail-meta-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+        .detail-owner { font-size: 12px; color: #6b7280; }
+        .detail-count { font-size: 12px; color: #9ca3af; }
+        .detail-desc  { font-size: 13px; color: #6b7280; margin-top: 4px; line-height: 1.5; }
+
+        .item-list { display: flex; flex-direction: column; gap: 10px; }
+        .item-row {
+          display: flex; align-items: center; justify-content: space-between;
+          border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 18px;
+          background: #fff; transition: box-shadow .15s;
+        }
+        .item-row:hover { box-shadow: 0 2px 10px rgba(0,0,0,.07); }
+        .item-row-left { display: flex; flex-direction: column; gap: 3px; }
+        .item-name   { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+        .item-date   { font-size: 12px; color: #9ca3af; }
+        .item-status { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px; }
+
+        /* ── Common ── */
+        .empty-state {
+          text-align: center; padding: 60px 20px; color: #9ca3af; font-size: 14px;
+          border: 1.5px dashed #e5e7eb; border-radius: 12px;
+        }
+        .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: .5; }
+        .status-msg { text-align: center; padding: 60px; color: #6b7280; font-size: 15px; }
+        .error-box  { padding: 32px; border: 1px dashed #fca5a5; border-radius: 12px; background: #fff5f5; color: #b91c1c; font-size: 14px; text-align: center; }
+
+        /* ── Modal ── */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal { background: #fff; border-radius: 14px; padding: 28px; width: min(460px, 90vw); box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+        .modal-title { font-size: 17px; font-weight: 700; color: #1a1a1a; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid #f0f0f0; }
+        .modal-error { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; }
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 11px; font-weight: 600; color: #5f6368; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+        .required { color: #ea4335; }
+        .form-input, .form-textarea { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 13px; color: #202124; font-family: inherit; outline: none; transition: border-color .2s, box-shadow .2s; }
+        .form-input:focus, .form-textarea:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+        .form-textarea { resize: vertical; min-height: 72px; }
+        .visibility-toggle { display: flex; gap: 8px; }
+        .vis-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1.5px solid #e5e7eb; background: #f9fafb; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: all .15s; }
+        .vis-active-public  { border-color: #2d6a4f; background: #f0fdf4; color: #2d6a4f; }
+        .vis-active-private { border-color: #6366f1; background: #f5f3ff; color: #5b21b6; }
+        .vis-hint { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; padding-top: 16px; border-top: 1px solid #f1f3f4; }
+        .btn-cancel { padding: 8px 18px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; font-size: 13px; color: #5f6368; cursor: pointer; font-weight: 500; font-family: inherit; transition: background .15s; }
+        .btn-cancel:hover:not(:disabled) { background: #f8f9fa; }
+        .btn-save { padding: 8px 20px; border-radius: 8px; border: none; background: #2d6a4f; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
+        .btn-save:hover:not(:disabled) { background: #1b4332; }
+        .btn-cancel:disabled, .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+
+        /* ── Add-Animal Modal ── */
+        .modal-wide { width: min(560px, 92vw); max-height: 90vh; overflow-y: auto; }
+        .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 0; }
+        .form-row-2 .form-group { margin-bottom: 16px; }
+        .form-select {
+          width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #e5e7eb;
+          font-size: 13px; color: #202124; font-family: inherit; outline: none;
+          background: #fff; cursor: pointer; transition: border-color .2s, box-shadow .2s;
+        }
+        .form-select:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+
         .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
         .radio-label {
           display: flex; align-items: center; gap: 6px;
-          font-size: 12px; color: #202124; cursor: pointer;
-          background: #f8f9fa; border: 1px solid #dadce0;
+          font-size: 12px; color: #374151; cursor: pointer;
+          background: #f9fafb; border: 1.5px solid #e5e7eb;
           border-radius: 20px; padding: 5px 12px;
           transition: all .15s; user-select: none;
         }
-        .radio-label:hover { border-color: #1a73e8; background: #e8f0fe; }
-        /* Input verstecken – Label-Styling übernimmt das visuelle Feedback */
-        .radio-label input[type="radio"] {
-          appearance: none; -webkit-appearance: none;
-          position: absolute; opacity: 0; width: 0; height: 0;
+        .radio-label:hover { border-color: #2d6a4f; background: #f0fdf4; }
+        .radio-checked { background: #f0fdf4; border-color: #2d6a4f; color: #2d6a4f; font-weight: 600; }
+
+        /* ── Detail header with add button ── */
+        .detail-title-row {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; margin-bottom: 8px;
         }
-        .radio-label:has(input:checked) {
-          background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; font-weight: 500;
+        .btn-add-animal {
+          white-space: nowrap; padding: 8px 16px;
+          background: #2d6a4f; color: #fff; border: none; border-radius: 8px;
+          font-size: 13px; font-weight: 600; cursor: pointer;
+          font-family: inherit; transition: background .15s; flex-shrink: 0;
+        }
+        .btn-add-animal:hover { background: #1b4332; }
+
+        /* ── Animal card grid (detail view) ── */
+        .animal-card-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 20px;
+        }
+        .animal-card {
+          border-radius: 14px; border: 1px solid #e5e7eb; background: #fff;
+          overflow: hidden; transition: box-shadow .2s, transform .2s;
+          display: flex; flex-direction: column;
+        }
+        .animal-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.1); transform: translateY(-3px); }
+
+        .animal-card-img-wrap {
+          width: 100%; height: 180px; cursor: pointer; overflow: hidden;
+          background: #f3f4f6; flex-shrink: 0;
+        }
+        .animal-card-img {
+          width: 100%; height: 100%; object-fit: cover;
+          transition: transform .3s;
+        }
+        .animal-card-img-wrap:hover .animal-card-img { transform: scale(1.04); }
+        .animal-card-img-placeholder {
+          width: 100%; height: 100%; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; gap: 6px;
+          color: #9ca3af; font-size: 32px;
+        }
+        .animal-card-img-hint { font-size: 11px; font-weight: 500; }
+        .animal-card-img-placeholder:hover { background: #e9ecef; }
+
+        .animal-card-body { padding: 14px 14px 16px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .animal-card-name { font-size: 15px; font-weight: 700; color: #111827; }
+        .animal-card-scientific { font-size: 12px; color: #6b7280; font-style: italic; }
+        .animal-card-meta { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+        .animal-card-cat  { font-size: 12px; color: #6b7280; }
+        .animal-card-loc  { font-size: 12px; color: #6b7280; }
+        .animal-card-badge {
+          display: inline-block; margin-top: 8px; align-self: flex-start;
+          font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
         }
 
-        .modal-error {
-          font-size: 12px; color: #c5221f; background: #fce8e6;
-          padding: 8px 10px; border-radius: 4px; margin-bottom: 12px;
+        /* ── Image Modal ── */
+        .img-upload-btn {
+          display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+          padding: 9px 18px; background: #2d6a4f; color: #fff;
+          border-radius: 8px; font-size: 13px; font-weight: 600;
+          margin-bottom: 18px; transition: background .15s;
         }
+        .img-upload-btn:hover { background: #1b4332; }
 
-        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 1px solid #f1f3f4; }
-        .btn-cancel {
-          padding: 8px 18px; border-radius: 6px; border: 1px solid #dadce0;
-          background: #fff; font-size: 13px; color: #5f6368; cursor: pointer;
-          font-weight: 500; font-family: inherit; transition: background .15s;
+        .img-grid {
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+          gap: 12px; margin-bottom: 16px;
         }
-        .btn-cancel:hover:not(:disabled) { background: #f1f3f4; }
-        .btn-save {
-          padding: 8px 20px; border-radius: 6px; border: none;
-          background: #1a73e8; color: #fff; font-size: 13px;
-          font-weight: 600; cursor: pointer; font-family: inherit;
-          transition: background .15s;
+        .img-thumb-wrap {
+          position: relative; border-radius: 10px; overflow: hidden;
+          aspect-ratio: 1; background: #f3f4f6;
+          border: 1.5px solid #e5e7eb;
         }
-        .btn-save:hover:not(:disabled) { background: #1558b0; }
-        .btn-save:disabled, .btn-cancel:disabled { opacity: .6; cursor: not-allowed; }
+        .img-thumb {
+          width: 100%; height: 100%; object-fit: cover; display: block;
+        }
+        .img-delete-btn {
+          position: absolute; top: 5px; right: 5px;
+          background: rgba(0,0,0,.55); color: #fff; border: none;
+          border-radius: 50%; width: 22px; height: 22px; font-size: 11px;
+          cursor: pointer; display: flex; align-items: center; justify-content: center;
+          opacity: 0; transition: opacity .15s;
+        }
+        .img-thumb-wrap:hover .img-delete-btn { opacity: 1; }
+        .img-loading { color: #9ca3af; font-size: 13px; padding: 20px 0; text-align: center; }
+        .img-empty   {
+          color: #9ca3af; font-size: 13px; padding: 32px 20px; text-align: center;
+          border: 1.5px dashed #e5e7eb; border-radius: 10px; margin-bottom: 16px;
+        }
+        .img-single-wrap { margin-bottom: 16px; }
+        .img-single {
+          width: 100%; max-height: 340px; object-fit: contain; border-radius: 10px;
+          border: 1px solid #e5e7eb; background: #f9fafb; display: block;
+        }
+        .img-single-actions { display: flex; gap: 10px; margin-top: 12px; }
+        .img-upload-btn-sm { font-size: 12px; padding: 7px 14px; }
+        .img-delete-full-btn {
+          padding: 7px 14px; border-radius: 8px; border: 1.5px solid #fecaca;
+          background: #fff; color: #b91c1c; font-size: 12px; font-weight: 600;
+          cursor: pointer; font-family: inherit; transition: background .15s;
+        }
+        .img-delete-full-btn:hover { background: #fee2e2; }
       `}</style>
 
       <div className="app-layout">
-        <Navbar activeNav="sammlungen" />
+        <Navbar activeNav="tierliste" />
 
         <main className="main-content">
-          <header className="header">
-            <div className="breadcrumbs">Übersicht / Sammlung</div>
-            <h1 className="page-title">Sammlung</h1>
-          </header>
 
-          <div className="toolbar">
-            <div className="search-wrap">
-              <span className="search-icon">🔍</span>
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Suche nach Name oder Status…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+          {/* ── Detail View ── */}
+          {detail && !detailLoading && (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">📂 Sammlungen</h1>
+                </div>
+              </div>
+              <CollectionDetailView
+                detail={detail}
+                onBack={() => setDetail(null)}
+                onAnimalAdded={() => openCollection(detail.id)}
+                onImageChanged={() => openCollection(detail.id)}
+                isSignedIn={isSignedIn ?? false}
               />
-            </div>
-            <button className="btn-add" onClick={() => setShowModal(true)}>
-              + Tier hinzufügen
-            </button>
-          </div>
+            </>
+          )}
 
-          {loading && <div className="status-message">Lade Tiere…</div>}
-          {error   && <div className="error-message">Fehler beim Laden: {error}</div>}
+          {detailLoading && <div className="status-msg">Sammlung wird geladen…</div>}
 
-          {!loading && !error && (
-            <div className="animal-grid">
-              {filtered.length > 0
-                ? filtered.map((a) => <AnimalCard key={a.id} animal={a} />)
-                : (
-                  <div className="empty-state">
-                    {searchTerm
-                      ? `Keine Tiere für „${searchTerm}" gefunden.`
-                      : 'Noch keine Einträge vorhanden.'}
-                  </div>
-                )
-              }
-            </div>
+          {/* ── Collections Grid ── */}
+          {!detail && !detailLoading && (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">📂 Sammlungen</h1>
+                  <p className="page-sub">Öffentliche und private Sammlungen verwalten</p>
+                </div>
+              </div>
+
+              <div className="toolbar">
+                <div className="search-wrap">
+                  <span className="search-icon">🔍</span>
+                  <input type="text" className="search-input"
+                    placeholder="Sammlung suchen…"
+                    value={search} onChange={e => setSearch(e.target.value)} />
+                </div>
+                {isSignedIn && (
+                  <button className="btn-new" onClick={() => setShowModal(true)}>
+                    + Neue Sammlung
+                  </button>
+                )}
+              </div>
+
+              <div className="tabs">
+                <button className={`tab-btn${tab === 'public' ? ' tab-active' : ''}`} onClick={() => setTab('public')}>
+                  🌍 Öffentlich <span className="tab-count">{publicCols.length}</span>
+                </button>
+                <button className={`tab-btn${tab === 'mine' ? ' tab-active' : ''}`} onClick={() => setTab('mine')}>
+                  👤 Meine Sammlungen <span className="tab-count">{mineCols.length}</span>
+                </button>
+              </div>
+
+              {loading && <div className="status-msg">Sammlungen werden geladen…</div>}
+              {error   && <div className="error-box">⚠️ {error}</div>}
+
+              {!loading && !error && (
+                <>
+                  {tab === 'public' && (
+                    publicCols.length === 0 ? (
+                      <div className="empty-state">
+                        <div className="empty-icon">📂</div>
+                        {search ? `Keine Sammlungen für „${search}" gefunden.` : 'Keine öffentlichen Sammlungen vorhanden.'}
+                      </div>
+                    ) : (
+                      <div className="col-grid">
+                        {publicCols.map(col => (
+                          <CollectionCard key={col.id} col={col} clerkUserId={clerkUserId}
+                            onOpen={openCollection} onDeleted={load} />
+                        ))}
+                      </div>
+                    )
+                  )}
+
+                  {tab === 'mine' && (
+                    mineCols.length === 0 ? (
+                      <div className="empty-state">
+                        <div className="empty-icon">📂</div>
+                        Du hast noch keine eigenen Sammlungen. Klicke auf „+ Neue Sammlung".
+                      </div>
+                    ) : (
+                      <>
+                        {myPrivate.length > 0 && (
+                          <>
+                            <div className="section-header">
+                              <span>🔒 Privat</span>
+                              <div className="section-line" />
+                              <span style={{ color: '#9ca3af', fontWeight: 400 }}>{myPrivate.length}</span>
+                            </div>
+                            <div className="col-grid" style={{ marginBottom: 24 }}>
+                              {myPrivate
+                                .filter(c => search === '' || c.name.toLowerCase().includes(search.toLowerCase()))
+                                .map(col => (
+                                  <CollectionCard key={col.id} col={col} clerkUserId={clerkUserId}
+                                    onOpen={openCollection} onDeleted={load} />
+                                ))}
+                            </div>
+                          </>
+                        )}
+
+                        {myPublic.length > 0 && (
+                          <>
+                            <div className="section-header">
+                              <span>🌍 Öffentlich (meine)</span>
+                              <div className="section-line" />
+                              <span style={{ color: '#9ca3af', fontWeight: 400 }}>{myPublic.length}</span>
+                            </div>
+                            <div className="col-grid">
+                              {myPublic
+                                .filter(c => search === '' || c.name.toLowerCase().includes(search.toLowerCase()))
+                                .map(col => (
+                                  <CollectionCard key={col.id} col={col} clerkUserId={clerkUserId}
+                                    onOpen={openCollection} onDeleted={load} />
+                                ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )
+                  )}
+                </>
+              )}
+            </>
           )}
         </main>
       </div>
 
-      {/* Modal wird nur gerendert wenn es offen ist */}
       {showModal && (
-        <AnimalModal
+        <CreateModal
           onClose={() => setShowModal(false)}
           onSaved={handleSaved}
+          clerkUserId={clerkUserId}
         />
       )}
     </>

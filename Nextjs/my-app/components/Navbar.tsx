@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 
 const NAV_ITEMS = [
-  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/dashboard" },
+  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/" },
   { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung"  },
   { id: "karte",     label: "Karte",           icon: "🗺", href: "/karte"     },
   { id: "leihe",     label: "Ausleihe",        icon: "⇄", href: "/leihe"     },
@@ -21,6 +21,7 @@ type Props = {
 export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
   const { user } = useUser();
+  const { isSignedIn } = useAuth();
   const [open, setOpen] = useState(true);
 
   const active =
@@ -221,16 +222,28 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           </button>
         </div>
 
-        {/* User */}
-        <div className="nb-user">
-          <div className="nb-avatar">{initials}</div>
-          {open && (
-            <div className="nb-user-info">
-              <div className="nb-user-name">{userName}</div>
-              <div className="nb-user-role">{userRole}</div>
-            </div>
-          )}
-        </div>
+        {/* User / Login */}
+        {isSignedIn ? (
+          <div className="nb-user">
+            <div className="nb-avatar">{initials}</div>
+            {open && (
+              <div className="nb-user-info">
+                <div className="nb-user-name">{userName}</div>
+                <div className="nb-user-role">{userRole}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <Link href="/login" style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "14px 16px", borderTop: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.6)", textDecoration: "none",
+            fontSize: 13, transition: "color 0.15s",
+          }}>
+            <div className="nb-avatar" style={{ background: "#2e4d2e", fontSize: 14 }}>→</div>
+            {open && <span>Anmelden</span>}
+          </Link>
+        )}
 
       </aside>
     </>

@@ -1,57 +1,584 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useAuth, useClerk } from "@clerk/nextjs";
+import { formatDate } from "../utils/date";
+import Navbar from "../components/Navbar";
+import { Map, MapStyle, config, Marker } from "@maptiler/sdk";
+import "@maptiler/sdk/dist/maptiler-sdk.css";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+type Specimen = {
+  id: string; name: string; taxon?: string; fundort?: string;
+  findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
+};
+type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
+
+const MOCK_LOANS: Loan[] = [
+  { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",  bis: "2026-06-01", status: "aktiv"     },
+  { id: "LEI-002", objekt: "Carabus violaceus",  an: "Prof. Weber", bis: "2026-04-30", status: "überfällig"},
+  { id: "LEI-003", objekt: "Lacerta agilis",     an: "M. Schmidt",  bis: "2026-07-15", status: "aktiv"     },
+];
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+function StatCard({ value, label, sub, accent }: { value: string | number; label: string; sub?: string; accent?: boolean }) {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to, aber erst will ich sachen testen{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy
-          </a>
-        </div>
-      </main>
+    <div className={`stat-card${accent ? " stat-card--accent" : ""}`}>
+      <span className="stat-value">{value}</span>
+      <span className="stat-label">{label}</span>
+      {sub && <span className="stat-sub">{sub}</span>}
     </div>
+  );
+}
+
+function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] }) {
+  const map: Record<string, string> = {
+    freigegeben: "pill--green",
+    ausstehend:  "pill--amber",
+    abgelehnt:   "pill--red",
+    aktiv:       "pill--green",
+    überfällig:  "pill--red",
+    zurück:      "pill--gray",
+  };
+  return <span className={`pill ${map[status] ?? "pill--gray"}`}>{status}</span>;
+}
+
+// ── Main Component ──────────────────────────────────────────────────────────
+export default function HomePage() {
+  const { isSignedIn, isLoaded } = useAuth();
+  const { signOut } = useClerk();
+
+  const [specimens, setSpecimens] = useState<Specimen[]>([]);
+  const [search, setSearch] = useState("");
+
+  const miniMapContainer = useRef<HTMLDivElement>(null);
+  const miniMapInstance  = useRef<Map | null>(null);
+
+  useEffect(() => {
+    const fetchAnimals = async () => {
+      try {
+        const response = await fetch("http://localhost:5099/api/animals/dashboard");
+        const data = await response.json();
+        setSpecimens(data);
+      } catch {
+        // Backend nicht erreichbar – Feed bleibt leer
+      }
+    };
+    fetchAnimals();
+    const interval = setInterval(fetchAnimals, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!miniMapContainer.current || miniMapInstance.current) return;
+
+    config.apiKey = process.env.NEXT_PUBLIC_MAP_API_KEY as string;
+
+    const map = new Map({
+      container: miniMapContainer.current,
+      style: MapStyle.STREETS,
+      center: [8.0020, 50.9411],
+      zoom: 4,
+      interactive: false,
+    });
+    miniMapInstance.current = map;
+
+    map.on("load", async () => {
+      try {
+        const res = await fetch("http://localhost:5099/api/geolocations/map-items");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const items: { latitude: number; longitude: number }[] = await res.json();
+        items.forEach(({ longitude, latitude }) => {
+          new Marker({ color: "#1a73e8" }).setLngLat([longitude, latitude]).addTo(map);
+        });
+      } catch {
+        // Kartenvorschau bleibt leer
+      }
+    });
+
+    return () => {
+      if (miniMapInstance.current) {
+        miniMapInstance.current.remove();
+        miniMapInstance.current = null;
+      }
+    };
+  }, []);
+
+  const pending = specimens.filter((s) => s.status === "ausstehend").length;
+  const overdue = MOCK_LOANS.filter((l) => l.status === "überfällig").length;
+
+  const q = search.toLowerCase();
+  const filteredSpecimens = q
+    ? specimens.filter(s =>
+        s.name?.toLowerCase().includes(q) ||
+        s.taxon?.toLowerCase().includes(q) ||
+        s.fundort?.toLowerCase().includes(q)
+      )
+    : specimens;
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Roboto+Mono:wght@300;400&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+          --bg:          #ffffff;
+          --bg-surface:  #f8f9fa;
+          --bg-card:     #ffffff;
+          --primary:      #1a73e8;
+          --primary-dim:  rgba(26,115,232,0.1);
+          --text-hi:     #202124;
+          --text-mid:    #5f6368;
+          --text-lo:     #70757a;
+          --amber:       #f9ab00;
+          --red:         #d93025;
+          --border:      #dadce0;
+          --green:       rgba(74,110,61,0.85);
+          --green-dim:   rgba(74,110,61,0.3);
+          --green-glow:  rgba(74,110,61,0.04);
+          --sidebar-w:   240px;
+          --top-h:       64px;
+          --ff-sans:     'Inter', system-ui, sans-serif;
+          --ff-mono:     'Roboto Mono', monospace;
+        }
+
+        html, body { height: 100%; background: var(--bg); color: var(--text-hi); font-family: var(--ff-mono); font-size: 13px; overflow: hidden; }
+
+        .bg-glow { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+        .bg-glow::before {
+          content: ''; position: absolute; top: -20%; left: -10%; width: 60%; height: 60%;
+          background: radial-gradient(ellipse, rgba(74,110,61,0.09) 0%, transparent 70%);
+          animation: driftA 22s ease-in-out infinite alternate;
+        }
+        .bg-glow::after {
+          content: ''; position: absolute; bottom: -20%; right: -10%; width: 50%; height: 50%;
+          background: radial-gradient(ellipse, rgba(100,70,30,0.07) 0%, transparent 70%);
+          animation: driftB 28s ease-in-out infinite alternate;
+        }
+        @keyframes driftA { from { transform: translate(0,0); } to { transform: translate(3%,2%); } }
+        @keyframes driftB { from { transform: translate(0,0); } to { transform: translate(-2%,-3%); } }
+
+        .grid-overlay {
+          position: fixed; inset: 0; pointer-events: none; z-index: 0;
+          background-image: linear-gradient(rgba(74,110,61,0.035) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(74,110,61,0.035) 1px, transparent 1px);
+          background-size: 48px 48px;
+        }
+        .scanlines {
+          position: fixed; inset: 0; z-index: 0; pointer-events: none;
+          background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px);
+        }
+
+        .app { position: relative; z-index: 10; display: flex; height: 100vh; overflow: hidden; }
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+        /* ── Top bar ── */
+        .topbar {
+          height: var(--top-h); display: flex; align-items: center; gap: 16px;
+          padding: 0 20px; border-bottom: 1px solid var(--border);
+          background: var(--bg-surface); flex-shrink: 0;
+        }
+        .topbar-title { font-size: 18px; font-weight: 300; color: var(--text-hi); letter-spacing: 0.02em; }
+        .topbar-title em { font-style: italic; color: var(--text-mid); }
+        .topbar-spacer { flex: 1; }
+
+        .topbar-search {
+          display: flex; align-items: center; gap: 8px;
+          background: rgba(74,110,61,0.05); border: 1px solid var(--border);
+          border-radius: 2px; padding: 5px 10px;
+        }
+        .topbar-search input {
+          background: none; border: none; outline: none; color: var(--text-hi);
+          font-family: var(--ff-mono); font-size: 11px; width: 160px;
+        }
+        .topbar-search input::placeholder { color: var(--text-lo); }
+
+        .notif-btn {
+          position: relative; background: none; border: 1px solid var(--border);
+          border-radius: 2px; width: 30px; height: 30px; display: flex;
+          align-items: center; justify-content: center; cursor: pointer;
+          color: var(--text-mid); font-size: 13px; transition: border-color 0.15s;
+        }
+        .notif-btn:hover { border-color: var(--green-dim); }
+        .notif-badge {
+          position: absolute; top: -4px; right: -4px; width: 14px; height: 14px;
+          background: rgba(180,60,60,0.9); border-radius: 50%;
+          font-size: 8px; display: flex; align-items: center; justify-content: center;
+          color: #fff;
+        }
+
+        .logout-btn {
+          display: flex; align-items: center; gap: 6px; background: none;
+          border: 1px solid var(--border); border-radius: 2px; padding: 5px 10px;
+          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono);
+          font-size: 10px; letter-spacing: 0.08em; transition: all 0.15s; text-decoration: none;
+        }
+        .logout-btn:hover { border-color: rgba(180,60,60,0.4); color: rgba(180,60,60,0.7); }
+
+        .login-btn {
+          display: flex; align-items: center; gap: 6px;
+          border: 1px solid var(--green-dim); border-radius: 2px; padding: 5px 12px;
+          color: var(--green); font-family: var(--ff-mono);
+          font-size: 10px; letter-spacing: 0.08em; transition: all 0.15s; text-decoration: none;
+          background: var(--green-glow);
+        }
+        .login-btn:hover { background: rgba(74,110,61,0.1); }
+
+        /* ── Banner für nicht eingeloggte Nutzer ── */
+        .guest-banner {
+          background: rgba(74,110,61,0.06); border-bottom: 1px solid var(--green-dim);
+          padding: 10px 20px; font-size: 11px; color: var(--text-mid);
+          display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+        }
+        .guest-banner a { color: var(--green); font-weight: 500; text-decoration: none; }
+        .guest-banner a:hover { text-decoration: underline; }
+
+        /* ── Content ── */
+        .content {
+          flex: 1; overflow-y: auto; padding: 20px;
+          display: flex; flex-direction: column; gap: 16px;
+        }
+
+        .section-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+        .section-title { font-size: 14px; font-weight: 400; color: var(--text-mid); letter-spacing: 0.15em; text-transform: uppercase; }
+        .section-line { flex: 1; height: 1px; background: var(--border); }
+        .section-count { font-size: 10px; color: var(--text-lo); }
+
+        /* ── Stat grid ── */
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+        .stat-card {
+          background: var(--bg-card); border: 1px solid var(--border);
+          border-radius: 2px; padding: 14px 16px; position: relative; overflow: hidden;
+          animation: fadeUp 0.5s ease both;
+        }
+        .stat-card::before {
+          content: ''; position: absolute; top: -1px; left: -1px;
+          width: 14px; height: 14px;
+          border-top: 1.5px solid var(--green-dim); border-left: 1.5px solid var(--green-dim);
+        }
+        .stat-card--accent { border-color: rgba(74,110,61,0.35); }
+        .stat-value { display: block; font-size: 32px; font-weight: 300; color: var(--text-hi); line-height: 1; margin-bottom: 4px; }
+        .stat-label { display: block; font-size: 10px; letter-spacing: 0.12em; color: var(--text-mid); text-transform: uppercase; }
+        .stat-sub { display: block; font-size: 9px; color: var(--text-lo); margin-top: 3px; }
+
+        /* ── Two-column layout ── */
+        .two-col { display: grid; grid-template-columns: 1fr 340px; gap: 14px; }
+        @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+        /* ── Card ── */
+        .card {
+          background: var(--bg-card); border: 1px solid var(--border); border-radius: 2px;
+          overflow: hidden; animation: fadeUp 0.55s ease both;
+        }
+        .card-head {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 10px 14px; border-bottom: 1px solid var(--border);
+        }
+        .card-title { font-size: 10px; letter-spacing: 0.15em; color: var(--text-mid); text-transform: uppercase; }
+        .card-action {
+          font-size: 10px; letter-spacing: 0.08em; color: var(--green);
+          background: none; border: 1px solid var(--green-dim); border-radius: 2px;
+          padding: 3px 8px; cursor: pointer; font-family: var(--ff-mono);
+          transition: all 0.15s; text-decoration: none;
+        }
+        .card-action:hover { background: var(--green-glow); }
+
+        /* ── Table ── */
+        .tbl { width: 100%; border-collapse: collapse; }
+        .tbl th {
+          text-align: left; padding: 8px 12px; font-size: 9px; letter-spacing: 0.12em;
+          color: var(--text-lo); text-transform: uppercase; border-bottom: 1px solid var(--border); font-weight: 400;
+        }
+        .tbl td { padding: 9px 12px; font-size: 11px; color: var(--text-mid); border-bottom: 1px solid rgba(74,110,61,0.07); }
+        .tbl tr:hover td { background: var(--green-glow); }
+        .tbl tr:last-child td { border-bottom: none; }
+        .td-name { color: var(--text-hi); font-style: italic; }
+        .td-id { color: var(--text-lo); font-size: 10px; }
+        .td-actions { display: flex; gap: 6px; }
+        .tbl-btn {
+          font-size: 9px; letter-spacing: 0.06em; background: none;
+          border: 1px solid var(--border); border-radius: 2px; padding: 2px 7px;
+          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono); transition: all 0.15s;
+        }
+        .tbl-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
+
+        /* ── Pills ── */
+        .pill {
+          display: inline-flex; align-items: center; gap: 5px;
+          font-size: 9px; letter-spacing: 0.1em; padding: 2px 7px;
+          border-radius: 2px; text-transform: uppercase;
+        }
+        .pill::before { content: ''; width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0; }
+        .pill--green  { background: rgba(74,110,61,0.12); color: rgba(120,180,90,0.85); }
+        .pill--green::before  { background: rgba(100,180,80,0.7); }
+        .pill--amber  { background: rgba(180,130,40,0.12); color: var(--amber); }
+        .pill--amber::before  { background: var(--amber); }
+        .pill--red    { background: rgba(180,60,60,0.12); color: var(--red); }
+        .pill--red::before    { background: var(--red); }
+        .pill--gray   { background: rgba(100,100,100,0.1); color: rgba(140,140,140,0.6); }
+        .pill--gray::before   { background: rgba(140,140,140,0.4); }
+
+        /* ── Quick actions ── */
+        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
+        .action-btn {
+          display: flex; flex-direction: column; gap: 4px; padding: 12px;
+          background: rgba(74,110,61,0.05); border: 1px solid var(--border);
+          border-radius: 2px; cursor: pointer; transition: all 0.15s; text-decoration: none;
+        }
+        .action-btn:hover { border-color: var(--green-dim); background: var(--green-glow); }
+        .action-icon { font-size: 16px; }
+        .action-label { font-size: 10px; letter-spacing: 0.08em; color: var(--text-mid); }
+        .action-desc { font-size: 9px; color: var(--text-lo); }
+
+        /* ── Loan list ── */
+        .loan-item {
+          display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+          border-bottom: 1px solid rgba(74,110,61,0.07);
+        }
+        .loan-item:last-child { border-bottom: none; }
+        .loan-info { flex: 1; min-width: 0; }
+        .loan-name { font-size: 11px; color: var(--text-hi); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .loan-meta { font-size: 9px; color: var(--text-lo); letter-spacing: 0.05em; margin-top: 2px; }
+
+        /* ── Status bar ── */
+        .statusbar {
+          height: 30px; display: flex; align-items: center; justify-content: space-between;
+          padding: 0 20px; border-top: 1px solid var(--border);
+          background: rgba(12,15,10,0.9); flex-shrink: 0;
+          font-size: 10px; letter-spacing: 0.1em; color: var(--text-lo);
+        }
+        .status-dot {
+          display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+          background: rgba(74,110,61,0.7); margin-right: 6px;
+          animation: pulse 2.5s ease infinite; vertical-align: middle;
+        }
+        @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; box-shadow: 0 0 5px rgba(74,110,61,0.5); } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
+      `}</style>
+
+      <div className="bg-glow" />
+      <div className="grid-overlay" />
+      <div className="scanlines" />
+
+      <div className="app">
+        <Navbar activeNav="index" />
+
+        <div className="main">
+          {/* ── Top bar ── */}
+          <header className="topbar">
+            <h1 className="topbar-title">
+              Übersicht <em>/ Dashboard</em>
+            </h1>
+            <div className="topbar-spacer" />
+
+            <div className="topbar-search">
+              <span style={{ color: "var(--text-lo)", fontSize: 11 }}>⌕</span>
+              <input
+                type="text"
+                placeholder="Objekte durchsuchen…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+
+            {isLoaded && isSignedIn && (
+              <button className="notif-btn" title="Benachrichtigungen">
+                ◉
+                {(pending + overdue) > 0 && (
+                  <span className="notif-badge">{pending + overdue}</span>
+                )}
+              </button>
+            )}
+
+            {/* Login / Logout je nach Auth-Status */}
+            {isLoaded && (
+              isSignedIn ? (
+                <button
+                  className="logout-btn"
+                  onClick={() => signOut()}
+                >
+                  ⏻ Abmelden
+                </button>
+              ) : (
+                <Link href="/login" className="login-btn">
+                  → Anmelden
+                </Link>
+              )
+            )}
+          </header>
+
+          {/* ── Banner für Gäste ── */}
+          {isLoaded && !isSignedIn && (
+            <div className="guest-banner">
+              Du siehst den öffentlichen Feed. <a href="/login">Anmelden</a> oder <a href="/register">Registrieren</a>, um Objekte zu erfassen.
+            </div>
+          )}
+
+          {/* ── Content ── */}
+          <main className="content">
+
+            {/* Stats */}
+            <div>
+              <div className="section-header">
+                <span className="section-title">Systemübersicht</span>
+                <span className="section-line" />
+                <span className="section-count">Stand: {new Date().toLocaleDateString("de-DE")}</span>
+              </div>
+              <div className="stat-grid">
+                <StatCard value={specimens.length} label="Objekte gesamt" sub="in allen Sammlungen" accent />
+                <StatCard value={3} label="Sammlungen" sub="aktiv" />
+                <StatCard value={pending} label="Ausstehend" sub="Taxonomie-Freigabe" />
+                <StatCard value={MOCK_LOANS.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
+                <StatCard value={12} label="Fundorte" sub="weltweit kartiert" />
+              </div>
+            </div>
+
+            <div className="two-col">
+              {/* Left: Objektliste */}
+              <div>
+                <div className="section-header">
+                  <span className="section-title">Zuletzt erfasste Objekte</span>
+                  <span className="section-line" />
+                  <Link href="/Sammlung" className="card-action">Alle anzeigen ›</Link>
+                </div>
+                <div className="card">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Art (Taxon)</th>
+                        <th>Fundort</th>
+                        <th>Datum</th>
+                        <th>Status</th>
+                        {/* Aktionen-Spalte nur für eingeloggte Nutzer */}
+                        {isSignedIn && <th></th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSpecimens.length === 0 && (
+                        <tr>
+                          <td colSpan={isSignedIn ? 6 : 5} style={{ textAlign: "center", padding: "20px 12px", color: "var(--text-lo)" }}>
+                            Keine Objekte für „{search}" gefunden.
+                          </td>
+                        </tr>
+                      )}
+                      {filteredSpecimens.map((s) => (
+                        <tr key={s.id}>
+                          <td><span className="td-id">{s.id}</span></td>
+                          <td>
+                            <span className="td-name">{s.name}</span>
+                            <br />
+                            <span style={{ fontSize: 9, color: "var(--text-lo)" }}>{s.taxon}</span>
+                          </td>
+                          <td>{s.fundort}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{formatDate(s.findDate)}</td>
+                          <td><StatusPill status={s.status} /></td>
+                          {/* Edit/Karte-Buttons nur für authentifizierte Nutzer */}
+                          {isSignedIn && (
+                            <td>
+                              <div className="td-actions">
+                                <button className="tbl-btn">Edit</button>
+                                <button className="tbl-btn">Karte</button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Right column */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+                {/* Quick Actions */}
+                <div>
+                  <div className="section-header">
+                    <span className="section-title">Aktionen</span>
+                    <span className="section-line" />
+                  </div>
+                  <div className="card">
+                    <div className="action-grid">
+                      {/* "Neues Objekt" nur für eingeloggte Nutzer sichtbar */}
+                      {isSignedIn && (
+                        <Link href="/tierliste/neu" className="action-btn">
+                          <span className="action-icon">＋</span>
+                          <span className="action-label">Neues Objekt</span>
+                          <span className="action-desc">Tier oder Insekt erfassen</span>
+                        </Link>
+                      )}
+                      <Link href="/karte" className="action-btn">
+                        <span className="action-icon">◎</span>
+                        <span className="action-label">Kartenansicht</span>
+                        <span className="action-desc">Fundorte auf Karte</span>
+                      </Link>
+                      <Link href="/export" className="action-btn">
+                        <span className="action-icon">⇅</span>
+                        <span className="action-label">CSV Export</span>
+                        <span className="action-desc">Sammlung exportieren</span>
+                      </Link>
+                      <Link href="/taxonomie" className="action-btn">
+                        <span className="action-icon">⊞</span>
+                        <span className="action-label">Taxonomie</span>
+                        <span className="action-desc">{pending} ausstehend</span>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Map preview */}
+                <div>
+                  <div className="section-header">
+                    <span className="section-title">Kartenvorschau</span>
+                    <span className="section-line" />
+                    <Link href="/karte" className="card-action">Vollbild ›</Link>
+                  </div>
+                  <div className="card" style={{ overflow: "hidden" }}>
+                    <div ref={miniMapContainer} style={{ width: "100%", height: 160 }} />
+                  </div>
+                </div>
+
+                {/* Active loans */}
+                <div>
+                  <div className="section-header">
+                    <span className="section-title">Aktive Leihen</span>
+                    <span className="section-line" />
+                    <Link href="/leihe" className="card-action">Alle ›</Link>
+                  </div>
+                  <div className="card">
+                    {MOCK_LOANS.map((loan) => (
+                      <div key={loan.id} className="loan-item">
+                        <div className="loan-info">
+                          <div className="loan-name">{loan.objekt}</div>
+                          <div className="loan-meta">an {loan.an} · bis {loan.bis}</div>
+                        </div>
+                        <StatusPill status={loan.status} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </main>
+
+          <footer className="statusbar">
+            <span>
+              <span className="status-dot" />
+              System online
+            </span>
+            <span>Collectio Zoologica · Naturkunde Institut</span>
+            <span>TLS 1.3 · Verschlüsselt</span>
+          </footer>
+        </div>
+      </div>
+    </>
   );
 }

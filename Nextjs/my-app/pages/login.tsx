@@ -30,7 +30,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isSignedIn) {
-      router.push('/dashboard');
+      router.push('/');
     }
   }, [isSignedIn, router]);
 
@@ -53,7 +53,7 @@ export default function LoginPage() {
 
       if (signIn.status === "complete" && signIn.createdSessionId) {
         await setActive({ session: signIn.createdSessionId });
-        router.push("/dashboard"); 
+        router.push("/");
       } else {
         console.log("Weitere Schritte nötig (z.B. MFA):", {
           status: signIn.status,
@@ -76,7 +76,7 @@ export default function LoginPage() {
     (signIn as any).authenticateWithRedirect({
       strategy: provider,
       redirectUrl: '/sso-callback',
-      redirectUrlComplete: '/dashboard', 
+      redirectUrlComplete: '/',
     });
   };
 
@@ -104,13 +104,37 @@ export default function LoginPage() {
         }
 
         .page-label {
-          position: absolute; 
-          top: 0; 
+          position: absolute;
+          top: 0;
           left: 0;
-          padding: 18px 32px; 
-          font-size: 13px; 
-          color: #9ca3af; 
+          padding: 18px 32px;
+          font-size: 13px;
+          color: #9ca3af;
           font-weight: 400;
+        }
+
+        .close-btn {
+          position: absolute;
+          top: 16px;
+          right: 20px;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          border: none;
+          background: none;
+          color: #9ca3af;
+          font-size: 20px;
+          cursor: pointer;
+          transition: background 0.15s, color 0.15s;
+          text-decoration: none;
+          line-height: 1;
+        }
+        .close-btn:hover {
+          background: rgba(0,0,0,0.07);
+          color: #374151;
         }
 
         .section {
@@ -269,6 +293,7 @@ export default function LoginPage() {
 
       <div className="page">
         <div className="page-label">Login</div>
+        <Link href="/" className="close-btn" title="Zurück zum Dashboard">✕</Link>
 
         <section className="section" ref={loginBoxRef}>
           {/* Left: Hero mit Bild anstelle von CSS-Farbverlauf */}

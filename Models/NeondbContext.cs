@@ -60,6 +60,7 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.AgeClass).HasColumnName("age_class");
             entity.Property(e => e.BodyMassGram).HasColumnName("body_mass_gram");
             entity.Property(e => e.BodyLengthMm).HasColumnName("body_length_mm");
+            // Kategorie + Lebensraum: [NotMapped] bis ALTER TABLE ausgeführt wurde
 
             entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
                 .HasForeignKey(d => d.CollectionId)

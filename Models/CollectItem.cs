@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TodoApi.Models;
 
@@ -28,6 +29,10 @@ public partial class CollectItem
     public string? Sex { get; set; }
 
     public string? AgeClass { get; set; }
+
+    [NotMapped] public string? Kategorie { get; set; }
+
+    [NotMapped] public string? Lebensraum { get; set; }
 
     public decimal? BodyMassGram { get; set; }
 

@@ -4,8 +4,16 @@ import React, { useEffect, useRef } from 'react';
 import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
+import { useAuth } from '@clerk/nextjs';
 
 export default function MapPage() {
+  const { isSignedIn } = useAuth();
+  const isSignedInRef = useRef(isSignedIn);
+
+  useEffect(() => {
+    isSignedInRef.current = isSignedIn;
+  }, [isSignedIn]);
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapInstance  = useRef<Map | null>(null);
 
@@ -136,6 +144,22 @@ export default function MapPage() {
     // ── Klick auf Karte ──────────────────────────────────────────────────
     map.on('click', (e) => {
       const { lng, lat } = e.lngLat;
+
+      // Unangemeldete Nutzer dürfen keine Einträge erstellen
+      if (!isSignedInRef.current) {
+        new Popup({ closeButton: true, closeOnClick: true, maxWidth: '260px' })
+          .setLngLat([lng, lat])
+          .setHTML(`
+            <div style="padding:14px 16px;font-family:sans-serif;font-size:13px;color:#202124;">
+              <div style="font-weight:600;margin-bottom:6px;">🔒 Anmeldung erforderlich</div>
+              <div style="color:#5f6368;margin-bottom:10px;">Um Tiere auf der Karte zu erfassen, musst du angemeldet sein.</div>
+              <a href="/login" style="display:inline-block;padding:6px 14px;background:#0078FF;color:#fff;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">Anmelden</a>
+            </div>
+          `)
+          .addTo(map);
+        return;
+      }
+
       const content = buildPopupContent();
 
       const popup = new Popup({
