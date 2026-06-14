@@ -165,7 +165,7 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("gbif")]
+        [HttpPost("gbif")] // rufen wenn Nutzer die Artname eingibt
         public async Task<ActionResult<object>> CreateFromGbif(GbifLookupDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.SpeciesName))
@@ -231,7 +231,7 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("gbif/confirm")]
+        [HttpPost("gbif/confirm")] // für den Fall, wenn Nutzer Suggestion annimmt
         public async Task<ActionResult<object>> ConfirmGbifTaxonomy(ConfirmGbifTaxonomyDto dto)
         {
             if (dto.UsageKey <= 0)
@@ -262,7 +262,7 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("submissions")]
+        [HttpPost("submissions")] // für manuelle Einträge
         public async Task<ActionResult<object>> CreateTaxonomySubmission(CreateTaxonomySubmissionDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.Stamm) ||
@@ -300,7 +300,8 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpGet("submissions/pending")] // WICHTIG: später nur über Mod Ansicht aufrufbar! Später anpassen
+        [HttpGet("submissions/pending")] // Submissions für Moderator zu prüfen und freigeben oder ablehenn
+        // WICHTIG: später nur über Mod Ansicht aufrufbar! Später anpassen
         public async Task<ActionResult<object>> GetPendingTaxonomySubmissions()
         {
             var submissions = await _context.TaxonomySubmissions
