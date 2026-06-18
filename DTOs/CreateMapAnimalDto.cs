@@ -16,4 +16,9 @@ public class CreateMapAnimalDto
     public int? TaxonomyId { get; set; }
     public DateOnly? FindDate { get; set; }
     public string? LocationName { get; set; }
+
+    public string? Description { get; set; }
+    public string? Status { get; set; }
+    public string? Kategorie { get; set; }
+    public string? Lebensraum { get; set; }
 }

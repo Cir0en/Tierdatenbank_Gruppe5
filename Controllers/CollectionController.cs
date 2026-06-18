@@ -90,7 +90,12 @@ namespace TodoApi.Controllers
                         ImageUrl = item.ObjectImages
                             .OrderBy(img => img.CreatedAt)
                             .Select(img => img.ImageUrl)
-                            .FirstOrDefault()
+                            .FirstOrDefault(),
+                        Description  = item.Description,
+                        Sex          = item.Sex,
+                        AgeClass     = item.AgeClass,
+                        BodyMassGram = item.BodyMassGram,
+                        BodyLengthMm = item.BodyLengthMm,
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();

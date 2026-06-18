@@ -12,4 +12,9 @@ public class CollectionItemDto
     public string? Kategorie { get; set; }
     public string? Lebensraum { get; set; }
     public string? ImageUrl { get; set; }
+    public string? Description { get; set; }
+    public string? Sex { get; set; }
+    public string? AgeClass { get; set; }
+    public decimal? BodyMassGram { get; set; }
+    public decimal? BodyLengthMm { get; set; }
 }

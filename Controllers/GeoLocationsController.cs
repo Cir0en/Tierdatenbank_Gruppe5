@@ -202,13 +202,23 @@ namespace TodoApi.Controllers
             [FromQuery] decimal? east,
             [FromQuery] decimal? north)
         {
-            // Alle Tiere mit gültigen Koordinaten anzeigen, unabhängig von der Sammlung
+            var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
+            var isAuthenticated = !string.IsNullOrWhiteSpace(clerkId);
+
             var query = _context.CollectItems
                 .AsNoTracking()
                 .Where(i =>
                     i.FindingLocation != null &&
                     i.FindingLocation.Latitude != null &&
                     i.FindingLocation.Longitude != null);
+
+            // Nicht eingeloggte Nutzer sehen nur Einträge ohne Sammlung oder aus öffentlichen Sammlungen
+            if (!isAuthenticated)
+            {
+                query = query.Where(i =>
+                    i.CollectionId == null ||
+                    i.Collection!.IsPublic == true);
+            }
 
             if (west.HasValue && south.HasValue && east.HasValue && north.HasValue)
             {

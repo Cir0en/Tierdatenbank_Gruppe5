@@ -30,6 +30,7 @@ namespace TodoApi.Controllers
             var obj = await _context.CollectItems
                 .Include(o => o.Taxonomy)
                 .Include(o => o.Collection)
+                .Include(o => o.FindingLocation)
                 .FirstOrDefaultAsync(o => o.Id == id);
 
             if (obj == null) return NotFound();
@@ -134,7 +135,8 @@ namespace TodoApi.Controllers
                 TaxonomyId = dto.TaxonomyId,
                 FindingLocationId = location.Id,
                 FindDate = dto.FindDate,
-                Status = "ausstehend"
+                Description = dto.Description,
+                Status = string.IsNullOrWhiteSpace(dto.Status) ? "ausstehend" : dto.Status,
             };
 
             _context.CollectItems.Add(item);

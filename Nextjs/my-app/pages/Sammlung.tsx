@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/router';
 import { useUser, useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
@@ -29,6 +30,11 @@ interface CollectionItem {
   kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
+  description: string | null;
+  sex: string | null;
+  ageClass: string | null;
+  bodyMassGram: number | null;
+  bodyLengthMm: number | null;
 }
 
 const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
@@ -180,99 +186,9 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
   );
 }
 
-// ── Animal Image Modal ────────────────────────────────────────────────────────
+// ── Add Animal Modal ──────────────────────────────────────────────────────────
 
 const API = 'http://localhost:5099';
-
-interface AnimalImage { id: number; imageUrl: string; createdAt: string | null; }
-
-function AnimalImageModal({ animal, onClose }: {
-  animal: CollectionItem;
-  onClose: () => void;
-}) {
-  const [image, setImage]         = useState<AnimalImage | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-
-  const loadImage = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/api/images/${animal.id}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const list: AnimalImage[] = await res.json();
-      setImage(list[0] ?? null);
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
-  }, [animal.id]);
-
-  useEffect(() => { loadImage(); }, [loadImage]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true); setError(null);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch(`${API}/api/images/upload/${animal.id}`, { method: 'POST', body: fd });
-      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
-      await loadImage();
-    } catch (e: any) { setError(e.message); }
-    finally { setUploading(false); e.target.value = ''; }
-  };
-
-  const handleDelete = async () => {
-    if (!image || !confirm('Foto löschen?')) return;
-    try {
-      await fetch(`${API}/api/images/${image.id}`, { method: 'DELETE' });
-      setImage(null);
-    } catch (e: any) { setError(e.message); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">📷 Foto — {animal.name ?? `Tier #${animal.id}`}</div>
-        {error && <div className="modal-error">{error}</div>}
-
-        {loading ? (
-          <div className="img-loading">Wird geladen…</div>
-        ) : image ? (
-          <div className="img-single-wrap">
-            <img src={`${API}${image.imageUrl}`} alt="" className="img-single" />
-            <div className="img-single-actions">
-              <label className="img-upload-btn img-upload-btn-sm">
-                🔄 Foto ersetzen
-                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp"
-                  style={{ display: 'none' }} disabled={uploading} onChange={handleUpload} />
-              </label>
-              <button className="img-delete-full-btn" onClick={handleDelete}>🗑 Löschen</button>
-            </div>
-          </div>
-        ) : (
-          <div className="img-empty">
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📷</div>
-            Noch kein Foto vorhanden.
-            <div style={{ marginTop: 16 }}>
-              <label className="img-upload-btn">
-                {uploading ? '⏳ Wird hochgeladen…' : '+ Foto hochladen'}
-                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp"
-                  style={{ display: 'none' }} disabled={uploading} onChange={handleUpload} />
-              </label>
-            </div>
-          </div>
-        )}
-
-        <div className="modal-actions">
-          <button className="btn-cancel" onClick={onClose}>Schließen</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Add Animal Modal ──────────────────────────────────────────────────────────
 
 interface TaxonomyOption { id: number; name: string; rank: string | null; }
 
@@ -445,15 +361,14 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
 
 // ── Collection Detail View ─────────────────────────────────────────────────────
 
-function CollectionDetailView({ detail, onBack, onAnimalAdded, onImageChanged, isSignedIn }: {
+function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn }: {
   detail: CollectionDetail;
   onBack: () => void;
   onAnimalAdded: () => void;
-  onImageChanged: () => void;
   isSignedIn?: boolean;
 }) {
-  const [showAddModal, setShowAddModal]       = useState(false);
-  const [imageAnimal, setImageAnimal]         = useState<CollectionItem | null>(null);
+  const router = useRouter();
+  const [showAddModal, setShowAddModal] = useState(false);
 
   return (
     <div>
@@ -496,9 +411,9 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, onImageChanged, i
           {detail.items.map(item => {
             const badge = statusBadge(item.status);
             return (
-              <div key={item.id} className="animal-card">
+              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}`)}>
                 {/* Foto */}
-                <div className="animal-card-img-wrap" onClick={() => setImageAnimal(item)}>
+                <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
                     <img src={`${API}${item.imageUrl}`} alt={item.name ?? ''} className="animal-card-img" />
                   ) : (
@@ -552,12 +467,6 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, onImageChanged, i
         />
       )}
 
-      {imageAnimal && (
-        <AnimalImageModal
-          animal={imageAnimal}
-          onClose={() => { setImageAnimal(null); onImageChanged(); }}
-        />
-      )}
     </div>
   );
 }
@@ -853,53 +762,6 @@ export default function SammlungPage() {
           font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
         }
 
-        /* ── Image Modal ── */
-        .img-upload-btn {
-          display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-          padding: 9px 18px; background: #2d6a4f; color: #fff;
-          border-radius: 8px; font-size: 13px; font-weight: 600;
-          margin-bottom: 18px; transition: background .15s;
-        }
-        .img-upload-btn:hover { background: #1b4332; }
-
-        .img-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-          gap: 12px; margin-bottom: 16px;
-        }
-        .img-thumb-wrap {
-          position: relative; border-radius: 10px; overflow: hidden;
-          aspect-ratio: 1; background: #f3f4f6;
-          border: 1.5px solid #e5e7eb;
-        }
-        .img-thumb {
-          width: 100%; height: 100%; object-fit: cover; display: block;
-        }
-        .img-delete-btn {
-          position: absolute; top: 5px; right: 5px;
-          background: rgba(0,0,0,.55); color: #fff; border: none;
-          border-radius: 50%; width: 22px; height: 22px; font-size: 11px;
-          cursor: pointer; display: flex; align-items: center; justify-content: center;
-          opacity: 0; transition: opacity .15s;
-        }
-        .img-thumb-wrap:hover .img-delete-btn { opacity: 1; }
-        .img-loading { color: #9ca3af; font-size: 13px; padding: 20px 0; text-align: center; }
-        .img-empty   {
-          color: #9ca3af; font-size: 13px; padding: 32px 20px; text-align: center;
-          border: 1.5px dashed #e5e7eb; border-radius: 10px; margin-bottom: 16px;
-        }
-        .img-single-wrap { margin-bottom: 16px; }
-        .img-single {
-          width: 100%; max-height: 340px; object-fit: contain; border-radius: 10px;
-          border: 1px solid #e5e7eb; background: #f9fafb; display: block;
-        }
-        .img-single-actions { display: flex; gap: 10px; margin-top: 12px; }
-        .img-upload-btn-sm { font-size: 12px; padding: 7px 14px; }
-        .img-delete-full-btn {
-          padding: 7px 14px; border-radius: 8px; border: 1.5px solid #fecaca;
-          background: #fff; color: #b91c1c; font-size: 12px; font-weight: 600;
-          cursor: pointer; font-family: inherit; transition: background .15s;
-        }
-        .img-delete-full-btn:hover { background: #fee2e2; }
       `}</style>
 
       <div className="app-layout">
@@ -919,7 +781,6 @@ export default function SammlungPage() {
                 detail={detail}
                 onBack={() => setDetail(null)}
                 onAnimalAdded={() => openCollection(detail.id)}
-                onImageChanged={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
               />
             </>
