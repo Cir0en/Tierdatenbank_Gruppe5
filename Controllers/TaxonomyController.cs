@@ -165,8 +165,8 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("gbif")] // rufen wenn Nutzer die Artname eingibt
-        public async Task<ActionResult<object>> CreateFromGbif(GbifLookupDto dto)
+        [HttpGet("gbif")] // rufen wenn Nutzer die Artname eingibt
+        public async Task<ActionResult<object>> PreviewFromGbif([FromQuery] GbifLookupDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.SpeciesName))
                 return BadRequest("Artname ist erforderlich.");
@@ -189,15 +189,26 @@ namespace TodoApi.Controllers
 
             if (isSafeMatch)
             {
-                var species = await CreateChainFromGbifAsync(gbif!);
 
                 return Ok(new
                 {
-                    status = "created",
-                    taxonomyId = species.Id,
-                    gbifUsageKey = gbif!.UsageKey,
+                    status = "match_found",
+                    UsageKey = gbif!.UsageKey,
+                    input = speciesName,
+                    confidence = gbif.Confidence,
                     scientificName = gbif.ScientificName,
-                    canonicalName = gbif.CanonicalName
+                    canonicalName = gbif.CanonicalName,
+
+                    taxonomy = new
+                    {
+                        reich = gbif.Kingdom,
+                        stamm = gbif.Phylum,
+                        klasse = gbif.ClassName,
+                        ordnung = gbif.Order,
+                        familie = gbif.Family,
+                        gattung = gbif.Genus,
+                        art = gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName
+                    }
                 });
             }
 
