@@ -23,6 +23,10 @@ public partial class User
 
     public string? Institution { get; set; }
 
+    public bool IsBanned { get; set; }
+
+    public DateTime? DeletedAt { get; set; }
+
     public virtual ICollection<Collection> Collections { get; set; } = new List<Collection>();
 
     public virtual ICollection<Loan> LoanBorrowers { get; set; } = new List<Loan>();

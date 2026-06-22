@@ -263,6 +263,13 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("'Nutzer'::text")
                 .HasColumnName("role");
             entity.Property(e => e.Username).HasColumnName("username");
+
+            entity.Property(e => e.IsBanned)
+                .HasDefaultValue(false)
+                .HasColumnName("is_banned");
+
+            entity.Property(e => e.DeletedAt)
+                .HasColumnName("deleted_at");
         });
 
 
