@@ -6,7 +6,7 @@ import { useRouter } from 'next/router';
 import Navbar from '../components/Navbar';
 
 const API = 'http://localhost:5099';
-const ROLES = ['Nutzer', 'Moderator', 'Admin', 'Inaktiv'] as const;
+const ROLES = ['Nutzer', 'Moderator', 'Admin'] as const;
 type Role = typeof ROLES[number];
 
 interface UserEntry {
@@ -18,6 +18,7 @@ interface UserEntry {
   lastName: string | null;
   role: string | null;
   createdAt: string | null;
+  isBanned: boolean;
 }
 
 interface Stats {
@@ -46,7 +47,7 @@ function initials(u: UserEntry) {
 
 export default function AdminPage() {
   const { user, isLoaded: userLoaded } = useUser();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, getToken } = useAuth();
   const router = useRouter();
 
   const [users, setUsers]   = useState<UserEntry[]>([]);
@@ -55,6 +56,41 @@ export default function AdminPage() {
   const [error, setError]   = useState<string | null>(null);
   const [saving, setSaving] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  const apiFetch = useCallback(
+  async (
+    path: string,
+    options: RequestInit = {}
+  ) => {
+    const token = await getToken();
+
+    if (!token) {
+      throw new Error(
+        'Es konnte kein Anmeldetoken geladen werden.'
+      );
+    }
+
+    const headers = new Headers(options.headers);
+
+    headers.set(
+      'Authorization',
+      `Bearer ${token}`
+    );
+
+    if (options.body) {
+      headers.set(
+        'Content-Type',
+        'application/json'
+      );
+    }
+
+    return fetch(`${API}${path}`, {
+      ...options,
+      headers,
+    });
+  },
+  [getToken]
+);
 
   const currentRole = (user?.publicMetadata?.role as string) ?? '';
 
@@ -69,10 +105,22 @@ export default function AdminPage() {
   const fetchData = useCallback(async () => {
     try {
       const [usersRes, statsRes] = await Promise.all([
-        fetch(`${API}/api/users`),
-        fetch(`${API}/api/users/stats`),
+        apiFetch(`/api/users`),
+        apiFetch(`/api/users/stats`),
       ]);
-      if (!usersRes.ok || !statsRes.ok) throw new Error('Laden fehlgeschlagen');
+      
+      if (!usersRes.ok) {
+        throw new Error(
+          `Benutzer konnten nicht geladen werden: ${usersRes.status}`
+        );
+      }
+
+      if (!statsRes.ok) {
+        throw new Error(
+          `Statistiken konnten nicht geladen werden: ${statsRes.status}`
+        );
+      }
+
       setUsers(await usersRes.json());
       setStats(await statsRes.json());
     } catch (e: any) {
@@ -80,16 +128,28 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiFetch]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (
+      userLoaded &&
+      isSignedIn &&
+      currentRole === 'Admin'
+    ) {
+      void fetchData();
+    }
+  }, [
+    userLoaded,
+    isSignedIn,
+    currentRole,
+    fetchData
+  ]);
 
   const handleRoleChange = async (userId: number, role: Role) => {
     setSaving(userId);
     try {
-      const res = await fetch(`${API}/api/users/${userId}/role`, {
+      const res = await apiFetch(`/api/users/${userId}/role`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
       });
       if (!res.ok) throw new Error('Speichern fehlgeschlagen');
@@ -101,9 +161,56 @@ export default function AdminPage() {
     }
   };
 
+  const handleBanChange = async (
+  userId: number,
+  currentlyBanned: boolean
+) => {
+  setSaving(userId);
+  setError(null);
+
+  try {
+    const action =
+      currentlyBanned ? 'unban' : 'ban';
+
+    const res = await apiFetch(
+      `/api/users/${userId}/${action}`,
+      {
+        method: 'POST',
+      }
+    );
+
+    if (!res.ok) {
+      const message = await res.text();
+
+      throw new Error(
+        message || 'Statusänderung fehlgeschlagen'
+      );
+    }
+
+    setUsers(previous =>
+      previous.map(user =>
+        user.id === userId
+          ? {
+              ...user,
+              isBanned: !currentlyBanned,
+            }
+          : user
+      )
+    );
+  } catch (error) {
+    setError(
+      error instanceof Error
+        ? error.message
+        : 'Statusänderung fehlgeschlagen'
+    );
+  } finally {
+    setSaving(null);
+  }
+};
+
   const handleDelete = async (userId: number) => {
     try {
-      const res = await fetch(`${API}/api/users/${userId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/users/${userId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Löschen fehlgeschlagen');
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (e: any) {

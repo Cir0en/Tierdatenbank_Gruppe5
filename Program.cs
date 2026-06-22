@@ -34,6 +34,8 @@ builder.Services
     {
         options.Authority = builder.Configuration["Clerk:Authority"];
 
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

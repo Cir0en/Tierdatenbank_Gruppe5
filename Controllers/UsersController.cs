@@ -41,7 +41,7 @@ public class UsersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var admin = GetCurrentAdminAsync();
+        var admin = await GetCurrentAdminAsync();
 
         if (admin == null)
             return Forbid();
