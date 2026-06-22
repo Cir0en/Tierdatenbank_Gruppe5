@@ -4,6 +4,7 @@ using TodoApi.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text.Json.Serialization;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,6 +63,24 @@ builder.Services.AddHttpClient("Gbif", client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Collectio/1.0");
 });
 
+var clerkSecretKey = builder.Configuration["CLERK_SECRET_KEY"];
+
+if (string.IsNullOrWhiteSpace(clerkSecretKey))
+{
+    throw new InvalidOperationException(
+        "Clerk:SecretKey wurde nicht konfiguriert.");
+}
+
+builder.Services.AddHttpClient("Clerk", client =>
+{
+    client.BaseAddress = new Uri("https://api.clerk.com/v1/");
+
+    client.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue(
+            "Bearer",
+            clerkSecretKey);
+});
+
 var app = builder.Build();
 
 
@@ -85,6 +104,8 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
+app.UseMiddleware<TodoApi.Security.UserStatusMiddleware>();
+
 app.UseAuthorization();
 
 app.MapControllers();
