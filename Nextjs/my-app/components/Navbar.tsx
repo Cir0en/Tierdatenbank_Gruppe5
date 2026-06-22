@@ -6,12 +6,14 @@ import { useRouter } from "next/router";
 import { useUser, useAuth } from "@clerk/nextjs";
 
 const NAV_ITEMS = [
-  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/" },
-  { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung"  },
-  { id: "karte",     label: "Karte",           icon: "🗺", href: "/karte"     },
-  { id: "leihe",     label: "Ausleihe",        icon: "⇄", href: "/leihe"     },
-  { id: "taxonomie", label: "Taxonomie",       icon: "🌿", href: "/taxonomie" },
-  { id: "export",    label: "Einstellungen",   icon: "⚙", href: "/export"    },
+  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/",           roles: null },
+  { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung",   roles: null },
+  { id: "karte",     label: "Karte",           icon: "🗺", href: "/karte",      roles: null },
+  { id: "leihe",     label: "Ausleihe",        icon: "⇄", href: "/leihe",      roles: null },
+  { id: "taxonomie", label: "Taxonomie",       icon: "🌿", href: "/taxonomie",  roles: null },
+  { id: "export",    label: "Einstellungen",   icon: "⚙", href: "/export",     roles: null },
+  { id: "moderator", label: "Moderation",      icon: "🛡", href: "/moderator",  roles: ["Moderator", "Admin"] },
+  { id: "admin",     label: "Admin",           icon: "⚙️", href: "/admin",      roles: ["Admin"] },
 ];
 
 type Props = {
@@ -203,7 +205,9 @@ export default function Navbar({ activeNav: activeProp }: Props) {
 
         {/* Nav items */}
         <nav className="nb-nav">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter(item =>
+            !item.roles || item.roles.includes(userRole)
+          ).map((item) => (
             <Link
               key={item.id}
               href={item.href}
