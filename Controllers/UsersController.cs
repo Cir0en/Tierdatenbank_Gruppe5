@@ -37,6 +37,22 @@ public class UsersController : ControllerBase
             user.DeletedAt == null);
     }
 
+    // GET /api/users/me — eigene Rolle aus Neon-DB lesen (für Navbar)
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMe()
+    {
+        var clerkId = User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(clerkId)) return Unauthorized();
+
+        var me = await _db.Users
+            .Where(u => u.ClerkId == clerkId && u.DeletedAt == null)
+            .Select(u => new { u.Id, u.Role, u.Username, u.FirstName, u.LastName, u.IsBanned })
+            .FirstOrDefaultAsync();
+
+        if (me == null) return NotFound();
+        return Ok(me);
+    }
+
     // GET /api/users — alle Benutzer (nur Admin)
     [HttpGet]
     public async Task<IActionResult> GetAll()

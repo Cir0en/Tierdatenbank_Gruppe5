@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
@@ -274,6 +275,7 @@ namespace TodoApi.Controllers
         }
 
         [HttpPost("submissions")] // für manuelle Einträge
+        [Authorize]
         public async Task<ActionResult<object>> CreateTaxonomySubmission(CreateTaxonomySubmissionDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.Stamm) ||
@@ -284,6 +286,14 @@ namespace TodoApi.Controllers
                 string.IsNullOrWhiteSpace(dto.Art))
             {
                 return BadRequest("Alle Taxonomie-Felder sind erforderlich.");
+            }
+
+            var clerkId = User.FindFirst("sub")?.Value;
+            int? createdBy = null;
+            if (!string.IsNullOrWhiteSpace(clerkId))
+            {
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+                createdBy = user?.Id;
             }
 
             var submission = new TaxonomySubmission
@@ -297,7 +307,8 @@ namespace TodoApi.Controllers
                 Art = dto.Art.Trim(),
                 Source = "manual",
                 Status = "pending",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = createdBy
             };
 
             _context.TaxonomySubmissions.Add(submission);
@@ -309,6 +320,35 @@ namespace TodoApi.Controllers
                 submission.Status,
                 submission.Art
             });
+        }
+
+        [HttpGet("submissions/my")] // eigene Einreichungen inkl. Ablehnungsgrund
+        [Authorize]
+        public async Task<ActionResult<object>> GetMySubmissions()
+        {
+            var clerkId = User.FindFirst("sub")?.Value;
+            if (string.IsNullOrWhiteSpace(clerkId)) return Unauthorized();
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+            if (user == null) return NotFound();
+
+            var submissions = await _context.TaxonomySubmissions
+                .Where(s => s.CreatedBy == user.Id)
+                .OrderByDescending(s => s.ReviewedAt ?? s.CreatedAt)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Art,
+                    s.Gattung,
+                    s.Familie,
+                    s.Status,
+                    s.ModeratorNote,
+                    s.CreatedAt,
+                    s.ReviewedAt
+                })
+                .ToListAsync();
+
+            return Ok(submissions);
         }
 
         [HttpGet("submissions/pending")] // Submissions für Moderator zu prüfen und freigeben oder ablehenn
@@ -373,7 +413,29 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("submissions/{id}/reject")] // abgelehnte bleiben in der Submissions tabelle, 
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> DeleteTaxonomy(int id)
+        {
+            var taxonomy = await _context.Taxonomies.FindAsync(id);
+            if (taxonomy == null) return NotFound();
+
+            if (taxonomy.Name == "Animalia" && taxonomy.Rank == "Reich")
+                return BadRequest("Das Reich Animalia kann nicht gelöscht werden.");
+
+            var hasChildren = await _context.Taxonomies.AnyAsync(t => t.ParentId == id);
+            if (hasChildren)
+                return BadRequest("Dieser Eintrag hat untergeordnete Einträge. Bitte zuerst diese löschen.");
+
+            var hasItems = await _context.CollectItems.AnyAsync(a => a.TaxonomyId == id);
+            if (hasItems)
+                return BadRequest("Diesem Eintrag sind Objekte zugeordnet und kann nicht gelöscht werden.");
+
+            _context.Taxonomies.Remove(taxonomy);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpPost("submissions/{id}/reject")] // abgelehnte bleiben in der Submissions tabelle,
                                               // werden nicht zu der main hinzugefügt
         public async Task<ActionResult<object>> RejectTaxonomySubmission(int id,
                                                                         ReviewTaxonomySubmissionDto dto)

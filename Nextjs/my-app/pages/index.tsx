@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { useAuth, useClerk } from "@clerk/nextjs";
+import { useAuth, useClerk, useUser } from "@clerk/nextjs";
 import { formatDate } from "../utils/date";
 import Navbar from "../components/Navbar";
 import { Map, MapStyle, config, Marker } from "@maptiler/sdk";
@@ -46,14 +46,27 @@ function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] })
 
 // ── Main Component ──────────────────────────────────────────────────────────
 export default function HomePage() {
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded, getToken, userId: clerkId } = useAuth();
   const { signOut } = useClerk();
+  const { user } = useUser();
 
   const [specimens, setSpecimens] = useState<Specimen[]>([]);
   const [search, setSearch] = useState("");
+  const [showNotif, setShowNotif] = useState(false);
+  const [pendingTax, setPendingTax] = useState(0);
+  const [userRole, setUserRole] = useState("Nutzer");
+  const [notifLoans, setNotifLoans] = useState<{ endDate: string | null; isOverdue: boolean }[]>([]);
+  const [rejectedSubs, setRejectedSubs] = useState<{ id: number; art: string; moderatorNote: string | null }[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<number>>(() => {
+    try {
+      const stored = localStorage.getItem("dismissed_tax_rejections");
+      return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
+    } catch { return new Set<number>(); }
+  });
 
   const miniMapContainer = useRef<HTMLDivElement>(null);
   const miniMapInstance  = useRef<Map | null>(null);
+  const notifWrapRef     = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchAnimals = async () => {
@@ -105,8 +118,88 @@ export default function HomePage() {
     };
   }, []);
 
+  // Refresh all notification data (role, pendingTax, loans)
+  const refreshNotifs = useCallback(async () => {
+    if (!clerkId) return;
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const meRes = await fetch("http://localhost:5099/api/users/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!meRes.ok) return;
+      const me = await meRes.json();
+      const role: string = me.role ?? "Nutzer";
+      setUserRole(role);
+
+      // Fetch real loans for overdue/soon notifications
+      const loanRes = await fetch("http://localhost:5099/api/loan", {
+        headers: { "X-Clerk-User-Id": clerkId },
+      });
+      if (loanRes.ok) setNotifLoans(await loanRes.json());
+
+      // Eigene abgelehnte Taxonomie-Einreichungen
+      const mySubsRes = await fetch("http://localhost:5099/api/taxonomy/submissions/my", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (mySubsRes.ok) {
+        const allSubs: { id: number; art: string; status: string; moderatorNote: string | null }[] =
+          await mySubsRes.json();
+        setRejectedSubs(allSubs.filter((s) => s.status === "rejected"));
+      }
+
+      // Pending taxonomy submissions (Moderator / Admin only)
+      if (role === "Moderator" || role === "Admin") {
+        const taxRes = await fetch("http://localhost:5099/api/taxonomy/submissions/pending");
+        if (taxRes.ok) setPendingTax((await taxRes.json()).length);
+      } else {
+        setPendingTax(0);
+      }
+    } catch {}
+  }, [clerkId, getToken]);
+
+  // Initial load + poll every 30 s
+  useEffect(() => {
+    refreshNotifs();
+    const interval = setInterval(refreshNotifs, 30_000);
+    return () => clearInterval(interval);
+  }, [refreshNotifs]);
+
+  // Re-fetch immediately when panel is opened
+  useEffect(() => {
+    if (showNotif) refreshNotifs();
+  }, [showNotif]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close panel on outside click
+  useEffect(() => {
+    if (!showNotif) return;
+    const handler = (e: MouseEvent) => {
+      if (notifWrapRef.current && !notifWrapRef.current.contains(e.target as Node))
+        setShowNotif(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showNotif]);
+
   const pending = specimens.filter((s) => s.status === "ausstehend").length;
-  const overdue = MOCK_LOANS.filter((l) => l.status === "überfällig").length;
+  const overdue = notifLoans.filter((l) => l.isOverdue).length;
+
+  const handleDismissRejection = (id: number) => {
+    const next = new Set(dismissedIds).add(id);
+    setDismissedIds(next);
+    try { localStorage.setItem("dismissed_tax_rejections", JSON.stringify([...next])); } catch {}
+  };
+
+  // Rollenbasierte Benachrichtigungen
+  type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number };
+  const notifications: Notif[] = [];
+  if (overdue > 0)
+    notifications.push({ icon: "⚠", text: `${overdue} Leihe${overdue !== 1 ? "n" : ""} überfällig`, sub: "Rückgabe überschritten", href: "/leihe", urgent: true });
+  if ((userRole === "Moderator" || userRole === "Admin") && pendingTax > 0)
+    notifications.push({ icon: "🌿", text: `${pendingTax} Taxonomie-Einreichung${pendingTax !== 1 ? "en" : ""} ausstehend`, sub: "Warten auf Moderation", href: "/moderator", urgent: pendingTax >= 5 });
+  for (const s of rejectedSubs.filter((s) => !dismissedIds.has(s.id)))
+    notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id });
 
   const q = search.toLowerCase();
   const filteredSpecimens = q
@@ -357,6 +450,48 @@ export default function HomePage() {
         @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; box-shadow: 0 0 5px rgba(74,110,61,0.5); } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+        /* ── Notification panel ── */
+        .notif-wrap { position: relative; }
+        .notif-panel {
+          position: fixed; top: 72px; right: 20px;
+          width: 300px; background: #fff;
+          border: 1px solid var(--border); border-radius: 6px;
+          box-shadow: 0 8px 32px rgba(0,0,0,.15); z-index: 1000; overflow: hidden;
+        }
+        .notif-head {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 10px 14px; border-bottom: 1px solid var(--border);
+        }
+        .notif-head-title { font-size: 10px; letter-spacing: .12em; color: var(--text-mid); text-transform: uppercase; }
+        .notif-head-role  { font-size: 9px; color: var(--text-lo); letter-spacing: .08em; padding: 1px 6px; border: 1px solid var(--border); border-radius: 2px; }
+        .notif-item {
+          display: flex; align-items: center; gap: 0;
+          border-bottom: 1px solid rgba(74,110,61,0.07);
+          transition: background .15s;
+        }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item:hover { background: rgba(74,110,61,0.05); }
+        .notif-item--urgent { border-left: 3px solid var(--red); }
+        .notif-item-content {
+          flex: 1; display: flex; align-items: flex-start; gap: 10px;
+          padding: 10px 14px; text-decoration: none; color: inherit; min-width: 0;
+        }
+        .notif-item-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+        .notif-item-text { font-size: 11px; color: var(--text-hi); font-weight: 500; }
+        .notif-item-sub  { font-size: 9px; color: var(--text-lo); margin-top: 2px; letter-spacing: .05em; }
+        .notif-dismiss {
+          flex-shrink: 0; width: 28px; height: 28px; margin-right: 8px;
+          background: none; border: 1px solid var(--border); border-radius: 4px;
+          color: var(--text-lo); font-size: 12px; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          transition: background .15s, color .15s, border-color .15s;
+        }
+        .notif-dismiss:hover { background: #dcfce7; border-color: #86efac; color: #16a34a; }
+        .notif-empty { padding: 20px 14px; text-align: center; font-size: 10px; color: var(--text-lo); letter-spacing: .08em; }
+        .notif-footer { padding: 8px 14px; border-top: 1px solid var(--border); text-align: center; }
+        .notif-footer a { font-size: 10px; color: var(--green); letter-spacing: .06em; text-decoration: none; }
+        .notif-footer a:hover { text-decoration: underline; }
+
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
@@ -388,12 +523,57 @@ export default function HomePage() {
             </div>
 
             {isLoaded && isSignedIn && (
-              <button className="notif-btn" title="Benachrichtigungen">
-                ◉
-                {(pending + overdue) > 0 && (
-                  <span className="notif-badge">{pending + overdue}</span>
+              <div className="notif-wrap" ref={notifWrapRef}>
+                <button className="notif-btn" title="Benachrichtigungen" onClick={() => setShowNotif(v => !v)}>
+                  ◉
+                  {notifications.length > 0 && (
+                    <span className="notif-badge">{notifications.length}</span>
+                  )}
+                </button>
+                {showNotif && (
+                  <div className="notif-panel">
+                    <div className="notif-head">
+                      <span className="notif-head-title">Benachrichtigungen</span>
+                      <span className="notif-head-role">{userRole}</span>
+                    </div>
+                    {notifications.length === 0 ? (
+                      <div className="notif-empty">✓ Keine neuen Benachrichtigungen</div>
+                    ) : (
+                      notifications.map((n, i) => (
+                        <div key={i} className={`notif-item${n.urgent ? " notif-item--urgent" : ""}`}>
+                          <Link
+                            href={n.href}
+                            className="notif-item-content"
+                            onClick={() => setShowNotif(false)}
+                          >
+                            <span className="notif-item-icon">{n.icon}</span>
+                            <div>
+                              <div className="notif-item-text">{n.text}</div>
+                              <div className="notif-item-sub">{n.sub}</div>
+                            </div>
+                          </Link>
+                          {n.dismissId !== undefined && (
+                            <button
+                              className="notif-dismiss"
+                              title="Als gelesen markieren"
+                              onClick={() => handleDismissRejection(n.dismissId!)}
+                            >
+                              ✓
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                    {notifications.length > 0 && (
+                      <div className="notif-footer">
+                        <Link href={userRole === "Moderator" || userRole === "Admin" ? "/moderator" : "/leihe"} onClick={() => setShowNotif(false)}>
+                          Alle anzeigen ›
+                        </Link>
+                      </div>
+                    )}
+                  </div>
                 )}
-              </button>
+              </div>
             )}
 
             {/* Login / Logout je nach Auth-Status */}

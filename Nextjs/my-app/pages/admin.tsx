@@ -92,15 +92,41 @@ export default function AdminPage() {
   [getToken]
 );
 
-  const currentRole = (user?.publicMetadata?.role as string) ?? '';
+  const [dbRole, setDbRole] = useState<string | null>(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+
+  // Rolle aus Neon-DB holen — Clerk publicMetadata ist nicht zuverlässig
+  // nach einer Admin-Rollenänderung (Clerk-Cache-Problem).
+  useEffect(() => {
+    if (!userLoaded || !isSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const res = await fetch(`${API}/api/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setDbRole(data.role ?? null);
+      } catch {
+        // ignore, roleLoaded wird trotzdem true
+      } finally {
+        if (!cancelled) setRoleLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userLoaded, isSignedIn, getToken]);
+
+  // DB-Rolle hat Vorrang; Fallback auf Clerk publicMetadata
+  const currentRole = dbRole ?? (user?.publicMetadata?.role as string) ?? '';
 
   // Redirect nur wenn Clerk vollständig geladen hat
   useEffect(() => {
     if (!userLoaded) return;
     if (!isSignedIn) { router.replace('/login'); return; }
-    // DEBUG: Rolle in Konsole ausgeben
-    console.log('[Admin] userLoaded:', userLoaded, '| isSignedIn:', isSignedIn, '| currentRole:', JSON.stringify(currentRole), '| publicMetadata:', user?.publicMetadata);
-  }, [userLoaded, isSignedIn, currentRole, router, user]);
+  }, [userLoaded, isSignedIn, router]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -220,8 +246,8 @@ export default function AdminPage() {
     }
   };
 
-  if (!userLoaded) return (
-    <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Clerk lädt…</div>
+  if (!userLoaded || !roleLoaded) return (
+    <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Laden…</div>
   );
   if (!isSignedIn) return null;
 

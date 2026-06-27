@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useUser, useAuth } from "@clerk/nextjs";
+
+const API = "http://localhost:5099";
 
 const NAV_ITEMS = [
   { id: "index",     label: "Dashboard",      icon: "⊞", href: "/",           roles: null },
@@ -22,16 +24,83 @@ type Props = {
 
 export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
-  const { user } = useUser();
-  const { isSignedIn } = useAuth();
+  const { user, isLoaded } = useUser();
+  const { isSignedIn, getToken } = useAuth();
   const [open, setOpen] = useState(true);
+  const [dbRole, setDbRole] = useState<string | null>(null);
+  const [notifCount, setNotifCount] = useState(0);
+
+  // Rolle + Benachrichtigungszahl holen und alle 30 s aktualisieren
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !user?.id) return;
+    let cancelled = false;
+    const userId = user.id;
+
+    const refresh = async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+
+        const meRes = await fetch(`${API}/api/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!meRes.ok || cancelled) return;
+        const me = await meRes.json();
+        const role: string = me.role ?? "Nutzer";
+        if (!cancelled) setDbRole(role);
+
+        let count = 0;
+
+        // Überfällige Leihen
+        const loanRes = await fetch(`${API}/api/loan`, {
+          headers: { "X-Clerk-User-Id": userId },
+        });
+        if (loanRes.ok && !cancelled) {
+          const loans: { isOverdue: boolean }[] = await loanRes.json();
+          count += loans.filter((l) => l.isOverdue).length;
+        }
+
+        // Ausstehende Taxonomie-Einreichungen (Moderator / Admin)
+        if (role === "Moderator" || role === "Admin") {
+          const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
+          if (taxRes.ok && !cancelled) {
+            const subs: unknown[] = await taxRes.json();
+            count += subs.length;
+          }
+        }
+
+        // Eigene abgelehnte Taxonomie-Einreichungen (ohne bereits gelesene)
+        const myRes = await fetch(`${API}/api/taxonomy/submissions/my`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (myRes.ok && !cancelled) {
+          const mine: { id: number; status: string }[] = await myRes.json();
+          let dismissed = new Set<number>();
+          try {
+            const stored = localStorage.getItem("dismissed_tax_rejections");
+            if (stored) dismissed = new Set<number>(JSON.parse(stored));
+          } catch {}
+          count += mine.filter((s) => s.status === "rejected" && !dismissed.has(s.id)).length;
+        }
+
+        if (!cancelled) setNotifCount(count);
+      } catch {
+        // Bei Fehler bleibt dbRole null → Fallback auf Clerk-Metadata
+      }
+    };
+
+    refresh();
+    const interval = setInterval(refresh, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isLoaded, isSignedIn, getToken, user?.id]);
 
   const active =
     activeProp ??
     (NAV_ITEMS.find((i) => i.href === router.pathname)?.id ?? "index");
 
   const userName = user?.fullName ?? user?.firstName ?? user?.emailAddresses[0]?.emailAddress ?? "Nutzer";
-  const userRole = (user?.publicMetadata?.role as string) ?? "Nutzer";
+  // DB-Rolle hat Vorrang; Fallback auf Clerk publicMetadata falls API noch lädt
+  const userRole = dbRole ?? (user?.publicMetadata?.role as string) ?? "Nutzer";
   const initials = userName
     .split(" ")
     .map((n) => n[0])
@@ -123,9 +192,34 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           width: 22px;
           text-align: center;
           line-height: 1;
+          position: relative;
         }
         .nb-nav-label {
           font-size: 14px;
+          flex: 1;
+        }
+        .nb-badge {
+          margin-left: auto;
+          background: #ef4444;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 700;
+          border-radius: 999px;
+          padding: 1px 6px;
+          min-width: 18px;
+          text-align: center;
+          line-height: 16px;
+          flex-shrink: 0;
+        }
+        .nb-badge-dot {
+          position: absolute;
+          top: -3px;
+          right: -4px;
+          width: 8px;
+          height: 8px;
+          background: #ef4444;
+          border-radius: 50%;
+          border: 1.5px solid #1a2f1a;
         }
 
         /* ── User section ── */
@@ -213,8 +307,16 @@ export default function Navbar({ activeNav: activeProp }: Props) {
               href={item.href}
               className={`nb-nav-item${active === item.id ? " nb-active" : ""}`}
             >
-              <span className="nb-nav-icon">{item.icon}</span>
+              <span className="nb-nav-icon">
+                {item.icon}
+                {!open && item.id === "index" && notifCount > 0 && (
+                  <span className="nb-badge-dot" />
+                )}
+              </span>
               {open && <span className="nb-nav-label">{item.label}</span>}
+              {open && item.id === "index" && notifCount > 0 && (
+                <span className="nb-badge">{notifCount > 99 ? "99+" : notifCount}</span>
+              )}
             </Link>
           ))}
         </nav>

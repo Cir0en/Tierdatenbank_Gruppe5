@@ -186,11 +186,117 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
   );
 }
 
-// ── Add Animal Modal ──────────────────────────────────────────────────────────
+// ── Loan Animal Modal ─────────────────────────────────────────────────────────
 
 const API = 'http://localhost:5099';
 
-interface TaxonomyOption { id: number; name: string; rank: string | null; }
+type LoanUser = { id: number; username: string; firstName: string | null; lastName: string | null; institution: string | null };
+
+function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
+  item: CollectionItem;
+  clerkUserId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [users, setUsers]         = useState<LoanUser[]>([]);
+  const [borrowerId, setBorrower] = useState<number | ''>('');
+  const [startDate, setStart]     = useState(today);
+  const [endDate, setEnd]         = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/api/loan/users`, { headers: { 'X-Clerk-User-Id': clerkUserId } })
+      .then(r => r.ok ? r.json() : [])
+      .then(setUsers)
+      .catch(() => {});
+  }, [clerkUserId]);
+
+  const displayName = (u: LoanUser) =>
+    [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!borrowerId || !startDate || !endDate) { setError('Bitte alle Felder ausfüllen.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/api/loan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
+        body: JSON.stringify({ objectId: item.id, borrowerId, startDate, endDate }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? `Fehler ${res.status}`);
+      }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={saving ? undefined : onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">⇄ Tier ausleihen</div>
+
+        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '10px 14px', marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{item.name ?? `Eintrag #${item.id}`}</div>
+          {item.taxonomyName && <div style={{ fontSize: 11, color: '#6b7280', fontStyle: 'italic', marginTop: 2 }}>{item.taxonomyName}</div>}
+        </div>
+
+        {error && <div className="modal-error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">Entleiher <span className="required">*</span></label>
+            <select className="form-select" value={borrowerId}
+              onChange={e => setBorrower(Number(e.target.value))} required>
+              <option value="">— Person auswählen —</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>
+                  {displayName(u)}{u.institution ? ` · ${u.institution}` : ''}
+                </option>
+              ))}
+            </select>
+            {users.length === 0 && (
+              <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                Keine weiteren Nutzer im System gefunden.
+              </p>
+            )}
+          </div>
+
+          <div className="form-row-2">
+            <div className="form-group">
+              <label className="form-label">Startdatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={startDate}
+                onChange={e => setStart(e.target.value)} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Rückgabedatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={endDate}
+                min={startDate} onChange={e => setEnd(e.target.value)} required />
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn-save" disabled={saving || !borrowerId}>
+              {saving ? '⏳ Wird gespeichert…' : '⇄ Ausleihe anlegen'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Add Animal Modal ──────────────────────────────────────────────────────────
+
+interface TaxonomyOption { id: number; name: string; rank: string | null; isApproved: boolean | null; }
 
 function AddAnimalModal({ collectionId, onClose, onSaved }: {
   collectionId: number;
@@ -215,7 +321,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   useEffect(() => {
     fetch('http://localhost:5099/api/taxonomy')
       .then(r => r.ok ? r.json() : [])
-      .then(setTaxonomies)
+      .then((data: TaxonomyOption[]) => setTaxonomies(data.filter(t => t.isApproved === true)))
       .catch(() => {});
   }, []);
 
@@ -361,14 +467,17 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
 
 // ── Collection Detail View ─────────────────────────────────────────────────────
 
-function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn }: {
+function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerkUserId }: {
   detail: CollectionDetail;
   onBack: () => void;
   onAnimalAdded: () => void;
   isSignedIn?: boolean;
+  clerkUserId: string | null;
 }) {
   const router = useRouter();
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddModal, setShowAddModal]     = useState(false);
+  const [loanItem, setLoanItem]             = useState<CollectionItem | null>(null);
+  const [loanSuccess, setLoanSuccess]       = useState<string | null>(null);
 
   return (
     <div>
@@ -384,6 +493,11 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn }: {
               </button>
             )}
           </div>
+          {loanSuccess && (
+            <div style={{ marginTop: 8, padding: '8px 14px', background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, fontSize: 13, color: '#065f46' }}>
+              ✓ {loanSuccess}
+            </div>
+          )}
           <div className="detail-meta-row">
             <span className={`col-badge ${detail.isPublic ? 'badge-public' : 'badge-private'}`}>
               {detail.isPublic ? '🌍 Öffentlich' : '🔒 Privat'}
@@ -452,6 +566,16 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn }: {
                       {item.status}
                     </span>
                   )}
+
+                  {detail.isOwner && clerkUserId && (
+                    <button
+                      className="btn-loan-animal"
+                      onClick={e => { e.stopPropagation(); setLoanItem(item); setLoanSuccess(null); }}
+                      title="Dieses Tier ausleihen"
+                    >
+                      ⇄ Ausleihen
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -464,6 +588,18 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn }: {
           collectionId={detail.id}
           onClose={() => setShowAddModal(false)}
           onSaved={() => { setShowAddModal(false); onAnimalAdded(); }}
+        />
+      )}
+
+      {loanItem && clerkUserId && (
+        <LoanAnimalModal
+          item={loanItem}
+          clerkUserId={clerkUserId}
+          onClose={() => setLoanItem(null)}
+          onSaved={() => {
+            setLoanItem(null);
+            setLoanSuccess(`„${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde erfolgreich ausgeliehen.`);
+          }}
         />
       )}
 
@@ -721,6 +857,14 @@ export default function SammlungPage() {
         }
         .btn-add-animal:hover { background: #1b4332; }
 
+        .btn-loan-animal {
+          margin-top: 10px; width: 100%; padding: 6px 10px;
+          background: none; border: 1.5px solid #a7f3d0; border-radius: 8px;
+          font-size: 12px; font-weight: 600; color: #065f46; cursor: pointer;
+          font-family: inherit; transition: all .15s;
+        }
+        .btn-loan-animal:hover { background: #f0fdf4; border-color: #2d6a4f; }
+
         /* ── Animal card grid (detail view) ── */
         .animal-card-grid {
           display: grid;
@@ -782,6 +926,7 @@ export default function SammlungPage() {
                 onBack={() => setDetail(null)}
                 onAnimalAdded={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
+                clerkUserId={clerkUserId}
               />
             </>
           )}
