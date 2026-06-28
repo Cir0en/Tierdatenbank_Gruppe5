@@ -6,25 +6,28 @@ using System.Text.Json;
 using System.Collections.ObjectModel;
 using Microsoft.Maui.ApplicationModel;
 using Tierapp.DTOs;
+using Tierapp.ViewModels;
 
 namespace Tierapp;
 
 public partial class Dashboard : ContentPage
 {
 
-	private readonly ObservableCollection<CollectItemDto> Animals = new();
-
-	// On Android emulator, use 10.0.2.2 to reach the host machine
-	private const string BaseUrl = "http://10.0.2.2:5099/";
-
-	public Dashboard()
+	private readonly DashboardViewModel _viewModel;
+	public Dashboard(DashboardViewModel viewModel)
 	{
 		InitializeComponent();
-		AnimalsCollectionView.ItemsSource = Animals;
-		_ = LoadAnimalsAsync();
+		_viewModel = viewModel;
+        BindingContext = _viewModel;
 	}
 
+	    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+        await _viewModel.LoadDataCommand.ExecuteAsync(null);
+    }
 
+/*
 	private async Task LoadAnimalsAsync()
 	{
 		Console.WriteLine("Loading animals from API...");
@@ -34,7 +37,6 @@ public partial class Dashboard : ContentPage
 			var resp = await http.GetAsync("api/animals");
 			if (!resp.IsSuccessStatusCode)
 			{
-				StatusLabel.Text = $"Status: API-Fehler {resp.StatusCode}";
 				Console.WriteLine($"API error: {resp.StatusCode}");
 				return;
 			}
@@ -47,7 +49,6 @@ public partial class Dashboard : ContentPage
 
 			if (items == null)
 			{
-				StatusLabel.Text = "Status: Keine Daten";
 				Console.WriteLine("Deserialized items is null");
 				return;
 			}
@@ -57,12 +58,10 @@ public partial class Dashboard : ContentPage
 				Animals.Clear();
 				foreach (var it in items)
 					Animals.Add(it);
-				StatusLabel.Text = $"Status: {items.Count} Tiere geladen";
 			});
 		}
 		catch (Exception ex)
 		{
-			StatusLabel.Text = "Status: Fehler beim Laden";
 			Console.WriteLine("LoadAnimalsAsync exception: " + ex);
 		}
 
@@ -79,4 +78,5 @@ public partial class Dashboard : ContentPage
 		Console.WriteLine("Tier anlegen button clicked");
 		await Shell.Current.GoToAsync("NewAnimal");
 	}
+	*/
 }

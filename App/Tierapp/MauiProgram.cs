@@ -1,4 +1,10 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Net.Http.Json;
+using Tierapp.ViewModels;
+using Tierapp.Services;
+using Microsoft.Extensions.DependencyInjection;
+using LocalizationResourceManager.Maui;
+using System.Resources;
 
 namespace Tierapp;
 
@@ -13,7 +19,15 @@ public static class MauiProgram
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+			})
+			.UseMauiMaps()
+			.UseMauiApp<App>().UseLocalizationResourceManager(settings =>
+			{
+				settings.AddResource(new ResourceManager("Tierapp.Resources.Languages.AppResources", typeof(App).Assembly));
+
 			});
+
+		ConfigureServices(builder.Services);
 
 #if DEBUG
 		builder.Logging.AddDebug();
@@ -21,4 +35,22 @@ public static class MauiProgram
 
 		return builder.Build();
 	}
+
+	private static void ConfigureServices(IServiceCollection services)
+	{
+		services.AddHttpClient<ApiService>(client =>
+		{
+			client.BaseAddress = new Uri("http://10.0.2.2:5099/");
+		});
+
+		// ViewModel registrieren
+		services.AddTransient<SammlungsViewModel>();
+		services.AddTransient<SettingsViewModel>();
+
+		// Pages registrieren
+		services.AddTransient<Dashboard>();
+		services.AddTransient<Sammlungen>();
+		services.AddTransient<Settings>();
+	} 
+
 }

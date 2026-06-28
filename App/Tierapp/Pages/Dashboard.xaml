@@ -1,36 +1,49 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="Tierapp.Dashboard">
+             x:Class="Tierapp.Dashboard"
+             xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui">
 
     <ScrollView>
         <VerticalStackLayout
             Padding="20"
             Spacing="12">
-            <Label
-                Text="Dashboard"
-                Style="{StaticResource Headline}"
-                SemanticProperties.HeadingLevel="Level1" />
+            <Label Text="{translator:Translate DashboardHeader}" FontSize="28" FontAttributes="Bold" TextColor="#1A2421" />
+            <Label Text="{translator:Translate DashboardUnderHeader}" TextColor="Gray" />
 
-            <HorizontalStackLayout Spacing="8">
-                <Label x:Name="StatusLabel" Text="Status: nicht verbunden" VerticalOptions="Center" />
-                <Button x:Name="RefreshBtn" Text="Refresh" Clicked="OnRefreshClicked" />
-                <Button x:Name="TierAnlegenBtn" Text="Tier anlegen" Clicked="OnTierAnlegenClicked" />
-            </HorizontalStackLayout>
+            <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" ColumnSpacing="15" RowSpacing="15">
+                <Frame Grid.Row="0" Grid.Column="0" CornerRadius="20" HasShadow="True">
+                    <VerticalStackLayout>
+                        <Label Text="🦋" FontSize="24"/>
+                        <Label Text="245" FontSize="20" FontAttributes="Bold"/>
+                        <Label Text="{translator:Translate DBFindingsLabel}" FontSize="12"/>
+                    </VerticalStackLayout>
+                </Frame>
+                <Frame Grid.Row="0" Grid.Column="1" CornerRadius="20" HasShadow="True">
+                    <VerticalStackLayout>
+                        <Label Text="📁" FontSize="24"/>
+                        <Label Text="12" FontSize="20" FontAttributes="Bold"/>
+                        <Label Text="{translator:Translate DBCollectionsLabel}" FontSize="12"/>
+                    </VerticalStackLayout>
+                </Frame>
+                <Frame Grid.Row="1" Grid.Column="0" CornerRadius="20" HasShadow="True">
+                    <VerticalStackLayout>
+                        <Label Text="​📍​​" FontSize="24"/>
+                        <Label Text="43" FontSize="20" FontAttributes="Bold"/>
+                        <Label Text="{translator:Translate DBLocationsLabel}" FontSize="12"/>
+                    </VerticalStackLayout>
+                </Frame>
+                <Frame Grid.Row="1" Grid.Column="1" CornerRadius="20" HasShadow="True">
+                    <VerticalStackLayout>
+                        <Label Text="📦​" FontSize="24"/>
+                        <Label Text="3" FontSize="20" FontAttributes="Bold"/>
+                        <Label Text="{translator:Translate DBLoansLabel}" FontSize="12"/>
+                    </VerticalStackLayout>
+                </Frame>
+            </Grid>
 
-            <CollectionView x:Name="AnimalsCollectionView" SelectionMode="None">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Frame Margin="0,4" Padding="8" BorderColor="{StaticResource Gray200}">
-                            <VerticalStackLayout>
-                                <Label Text="{Binding Name}" FontAttributes="Bold" />
-                                <Label Text="{Binding FindDate}" FontSize="12" />
-                                <Label Text="{Binding Status}" FontSize="12" />
-                            </VerticalStackLayout>
-                        </Frame>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
+            
+
 
         
         </VerticalStackLayout>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+
+
+<data name="HeadlineCollections" xml:space="preserve">
+  <value>Public Collections</value>
+</data>
+<data name="DashboardHeader" xml:space="preserve">
+  <value>Welcome to Collectio !</value>
+</data>
+<data name="DashboardUnderHeader" xml:space="preserve">
+  <value>See public Collections and explore new discoverys</value>
+</data>
+<data name="DBFindingsLabel" xml:space="preserve">
+  <value>Public Findings</value>
+</data>
+<data name="DBCollectionsLabel" xml:space="preserve">
+  <value>Collections</value>
+</data>
+<data name="DBLocationsLabel" xml:space="preserve">
+  <value>Finding locations</value>
+</data>
+<data name="DBLoansLabel" xml:space="preserve">
+  <value>Loans</value>
+</data>
+<data name="SettingsHeader" xml:space="preserve">
+  <value>Settings</value>
+</data>
+<data name="LanguageSettingsHeader" xml:space="preserve">
+  <value>Language</value>
+</data>
+<data name="EnglishLanguageButton" xml:space="preserve">
+  <value>English</value>
+</data>
+<data name="GermanLanguageButton" xml:space="preserve">
+  <value>German</value>
+</data>
+<data name="ThemeSettingsHeader" xml:space="preserve">
+  <value>Theme</value> 
+</data>
+<data name="LightThemeButton" xml:space="preserve">
+  <value>Light</value>
+</data>
+<data name="DarkThemeButton" xml:space="preserve">
+  <value>Dark</value>
+</data>
+<data name="ItalianLanguageButton" xml:space="preserve">
+  <value>Italian</value>
+</data>
+<data name="ChineseLanguageButton" xml:space="preserve">
+  <value>Chinese</value>
+</data>
+
+
+
+</root>

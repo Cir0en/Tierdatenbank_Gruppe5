@@ -11,15 +11,18 @@
     Shell.TitleColor="{StaticResource Primary}"
     Shell.DisabledColor="{StaticResource Gray300}">
 
-    <ShellContent Route="Login" ContentTemplate="{DataTemplate local:Login}" />
+    
 
     <TabBar Route ="MainTabs">
-        <Tab Title="Dashboard">
+        <Tab Title="Dashboard"  Icon="homeicon.svg">
             <ShellContent ContentTemplate="{DataTemplate local:Dashboard}" />
         </Tab>
         
-        <Tab Title="Sammlungen">
+        <Tab Title="Sammlungen" Icon="sammlungicon.svg">
             <ShellContent ContentTemplate="{DataTemplate local:Sammlungen}" />
+        </Tab>
+        <Tab Title="Einstellungen" Icon="settingsicon.svg">
+            <ShellContent ContentTemplate="{DataTemplate local:Settings}" />
         </Tab>
     </TabBar>
 
