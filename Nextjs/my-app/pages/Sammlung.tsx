@@ -294,9 +294,32 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
   );
 }
 
-// ── Add Animal Modal ──────────────────────────────────────────────────────────
+// ── GBIF Types ─────────────────────────────────────────────────────────────────
 
-interface TaxonomyOption { id: number; name: string; rank: string | null; isApproved: boolean | null; }
+interface GbifTaxonomy {
+  reich: string; stamm: string; klasse: string;
+  ordnung: string; familie: string; gattung: string; art: string;
+}
+interface GbifMatchResult {
+  status: 'match_found';
+  usageKey: number;
+  confidence: number;
+  canonicalName: string;
+  taxonomy: GbifTaxonomy;
+}
+interface GbifSuggestion {
+  usageKey?: number;
+  scientificName?: string;
+  canonicalName?: string;
+  rank?: string;
+}
+interface GbifNeedsConfirmation {
+  status: 'needs_confirmation';
+  suggestions: GbifSuggestion[];
+}
+type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
+
+// ── Add Animal Modal ──────────────────────────────────────────────────────────
 
 function AddAnimalModal({ collectionId, onClose, onSaved }: {
   collectionId: number;
@@ -310,20 +333,61 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   const [ageClass, setAgeClass]     = useState('');
   const [bodyMass, setBodyMass]     = useState('');
   const [bodyLen, setBodyLen]       = useState('');
-  const [taxonomyId, setTaxonomyId] = useState('');
+  const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
   const [kategorie, setKategorie]   = useState('');
   const [lebensraum, setLebensraum] = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  const [taxonomies, setTaxonomies] = useState<TaxonomyOption[]>([]);
 
-  useEffect(() => {
-    fetch('http://localhost:5099/api/taxonomy')
-      .then(r => r.ok ? r.json() : [])
-      .then((data: TaxonomyOption[]) => setTaxonomies(data.filter(t => t.isApproved === true)))
-      .catch(() => {});
-  }, []);
+  const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
+  const [gbifLoading, setGbifLoading]     = useState(false);
+  const [gbifError, setGbifError]         = useState<string | null>(null);
+  const [confirmedName, setConfirmedName] = useState<string | null>(null);
+  const [confirming, setConfirming]       = useState(false);
+
+  const resetGbif = () => {
+    setGbifResult(null);
+    setConfirmedName(null);
+    setTaxonomyId(null);
+    setGbifError(null);
+  };
+
+  const handleGbifSearch = async () => {
+    if (!name.trim()) return;
+    setGbifLoading(true);
+    resetGbif();
+    try {
+      const res = await fetch(`http://localhost:5099/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGbifResult(await res.json());
+    } catch (e: any) {
+      setGbifError('GBIF-Suche fehlgeschlagen: ' + e.message);
+    } finally {
+      setGbifLoading(false);
+    }
+  };
+
+  const handleGbifConfirm = async (usageKey: number, displayName: string) => {
+    setConfirming(true);
+    setGbifError(null);
+    try {
+      const res = await fetch('http://localhost:5099/api/taxonomy/gbif/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageKey }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTaxonomyId(data.taxonomyId);
+      setConfirmedName(displayName);
+      setGbifResult(null);
+    } catch (e: any) {
+      setGbifError('Bestätigung fehlgeschlagen: ' + e.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Bitte einen Artnamen eingeben.'); return; }
@@ -341,7 +405,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
           ageClass:     ageClass || null,
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
-          taxonomyId:   taxonomyId ? parseInt(taxonomyId) : null,
+          taxonomyId:   taxonomyId,
           kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           status:       seltenheit || null,
@@ -356,18 +420,87 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     }
   };
 
+  const matchResult  = gbifResult?.status === 'match_found'        ? gbifResult as GbifMatchResult       : null;
+  const needsConfirm = gbifResult?.status === 'needs_confirmation'  ? gbifResult as GbifNeedsConfirmation : null;
+
   return (
     <div className="modal-overlay" onClick={saving ? undefined : onClose}>
       <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
         <div className="modal-title">🐾 Neues Tier hinzufügen</div>
         {error && <div className="modal-error">{error}</div>}
 
+        {/* Artname + GBIF-Suche */}
         <div className="form-group">
           <label className="form-label">Artname <span className="required">*</span></label>
-          <input type="text" className="form-input" autoFocus
-            placeholder="z. B. Parnassius apollo"
-            value={name} onChange={e => setName(e.target.value)} />
+          <div className="gbif-search-row">
+            <input type="text" className="form-input" autoFocus
+              placeholder="z. B. Parnassius apollo"
+              value={name}
+              onChange={e => { setName(e.target.value); resetGbif(); }}
+              onKeyDown={e => { if (e.key === 'Enter') handleGbifSearch(); }} />
+            <button type="button" className="btn-gbif-search"
+              onClick={handleGbifSearch}
+              disabled={!name.trim() || gbifLoading || saving}>
+              {gbifLoading ? '⏳' : '🔍 Suchen'}
+            </button>
+          </div>
+          <div className="gbif-hint">Artname eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
         </div>
+
+        {gbifError && <div className="modal-error">{gbifError}</div>}
+
+        {/* Bestätigte Taxonomie */}
+        {confirmedName && (
+          <div className="gbif-confirmed">
+            <span>✓ Taxonomie: <em>{confirmedName}</em></span>
+            <button type="button" onClick={resetGbif} title="Zurücksetzen">✕</button>
+          </div>
+        )}
+
+        {/* GBIF Treffer */}
+        {matchResult && (
+          <div className="gbif-preview">
+            <div className="gbif-preview-title">
+              GBIF-Treffer — {matchResult.confidence}% Übereinstimmung
+            </div>
+            <div className="gbif-chain">
+              {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
+                <span key={rank} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span className="gbif-chain-item">
+                    <span className="gbif-rank">{rank}</span>
+                    <span className="gbif-val">{val}</span>
+                  </span>
+                  {i < arr.length - 1 && <span className="gbif-arrow">›</span>}
+                </span>
+              ))}
+            </div>
+            <button type="button" className="btn-gbif-accept" disabled={confirming}
+              onClick={() => handleGbifConfirm(matchResult.usageKey, matchResult.canonicalName)}>
+              {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
+            </button>
+          </div>
+        )}
+
+        {/* GBIF Vorschläge */}
+        {needsConfirm && (
+          <div className="gbif-preview gbif-preview--warn">
+            <div className="gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
+            {needsConfirm.suggestions.filter(s => s.usageKey).length > 0 ? (
+              <>
+                <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
+                {needsConfirm.suggestions.filter(s => s.usageKey).map((s, i) => (
+                  <button key={i} type="button" className="btn-gbif-suggestion" disabled={confirming}
+                    onClick={() => handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                    <em>{s.canonicalName ?? s.scientificName}</em>
+                    {s.rank && <span className="gbif-rank"> [{s.rank}]</span>}
+                  </button>
+                ))}
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+            )}
+          </div>
+        )}
 
         <div className="form-group">
           <label className="form-label">Beschreibung</label>
@@ -392,29 +525,17 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
           </div>
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Lebensraum</label>
-          <input type="text" className="form-input"
-            placeholder="z. B. Alpine Wiesen, Berghänge"
-            value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
-        </div>
-
         <div className="form-row-2">
+          <div className="form-group">
+            <label className="form-label">Lebensraum</label>
+            <input type="text" className="form-input"
+              placeholder="z. B. Alpine Wiesen, Berghänge"
+              value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+          </div>
           <div className="form-group">
             <label className="form-label">Funddatum</label>
             <input type="date" className="form-input"
               value={findDate} onChange={e => setFindDate(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Wissenschaftlicher Name (Taxonomie)</label>
-            <select className="form-select" value={taxonomyId} onChange={e => setTaxonomyId(e.target.value)}>
-              <option value="">— keine —</option>
-              {taxonomies.map(t => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.rank ? `[${t.rank}] ` : ''}{t.name}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
@@ -905,6 +1026,69 @@ export default function SammlungPage() {
           display: inline-block; margin-top: 8px; align-self: flex-start;
           font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
         }
+
+        /* ── GBIF Search ── */
+        .gbif-search-row { display: flex; gap: 8px; }
+        .gbif-search-row .form-input { flex: 1; }
+        .gbif-hint { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+
+        .btn-gbif-search {
+          white-space: nowrap; padding: 9px 14px; background: #eff6ff;
+          border: 1px solid #bfdbfe; border-radius: 8px;
+          font-size: 12px; font-weight: 600; color: #1d4ed8;
+          cursor: pointer; font-family: inherit; transition: all .15s;
+        }
+        .btn-gbif-search:hover:not(:disabled) { background: #dbeafe; }
+        .btn-gbif-search:disabled { opacity: .5; cursor: not-allowed; }
+
+        .gbif-preview {
+          background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 10px;
+          padding: 14px; margin-bottom: 16px;
+        }
+        .gbif-preview--warn { background: #fffbeb; border-color: #fde68a; }
+        .gbif-preview-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 10px; }
+
+        .gbif-chain {
+          display: flex; flex-wrap: wrap; align-items: center;
+          gap: 4px; margin-bottom: 12px;
+        }
+        .gbif-chain-item {
+          display: flex; flex-direction: column; align-items: center;
+          background: #fff; border: 1px solid #d1fae5; border-radius: 6px;
+          padding: 4px 8px; min-width: 56px;
+        }
+        .gbif-rank  { font-size: 9px; color: #9ca3af; text-transform: capitalize; }
+        .gbif-val   { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+        .gbif-arrow { font-size: 14px; color: #9ca3af; line-height: 1; }
+
+        .btn-gbif-accept {
+          padding: 7px 16px; background: #2d6a4f; color: #fff; border: none;
+          border-radius: 7px; font-size: 12px; font-weight: 600;
+          cursor: pointer; font-family: inherit; transition: background .15s;
+        }
+        .btn-gbif-accept:hover:not(:disabled) { background: #1b4332; }
+        .btn-gbif-accept:disabled { opacity: .5; cursor: not-allowed; }
+
+        .btn-gbif-suggestion {
+          display: block; width: 100%; text-align: left; margin-bottom: 6px;
+          padding: 8px 12px; background: #fff; border: 1px solid #fde68a;
+          border-radius: 8px; font-size: 12px; cursor: pointer;
+          font-family: inherit; transition: all .15s;
+        }
+        .btn-gbif-suggestion:hover:not(:disabled) { background: #fffbeb; border-color: #f59e0b; }
+        .btn-gbif-suggestion:disabled { opacity: .5; cursor: not-allowed; }
+
+        .gbif-confirmed {
+          display: flex; align-items: center; gap: 8px; justify-content: space-between;
+          background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 8px;
+          padding: 10px 14px; margin-bottom: 16px;
+          font-size: 13px; color: #065f46; font-weight: 500;
+        }
+        .gbif-confirmed button {
+          background: none; border: none; cursor: pointer;
+          font-size: 14px; color: #9ca3af; padding: 0 4px; line-height: 1;
+        }
+        .gbif-confirmed button:hover { color: #374151; }
 
       `}</style>
 
