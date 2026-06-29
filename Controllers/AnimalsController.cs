@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
@@ -54,6 +55,53 @@ namespace TodoApi.Controllers
                 .ToListAsync();
             return Ok(items);
         }
+        [HttpGet("export/csv")]
+        public async Task<IActionResult> ExportCsv()
+        {
+            var items = await _context.CollectItems
+                .Include(c => c.Taxonomy)
+                .Include(c => c.Collection)
+                .Include(c => c.FindingLocation)
+                .OrderBy(c => c.Id)
+                .ToListAsync();
+
+            static string Esc(string? v) =>
+                v == null ? "" : v.Contains(',') || v.Contains('"') || v.Contains('\n')
+                    ? $"\"{v.Replace("\"", "\"\"")}\"" : v;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("ID,Name,Status,Geschlecht,Altersklasse,Funddatum,Koerpermasse_g,Koerperlaenge_mm,Art,Gattung,Familie,Ordnung,Klasse,Stamm,Sammlung,Fundort,Beschreibung,Aufbewahrungsort");
+
+            foreach (var c in items)
+            {
+                var tax = c.Taxonomy;
+                sb.AppendLine(string.Join(",",
+                    c.Id,
+                    Esc(c.Name),
+                    Esc(c.Status),
+                    Esc(c.Sex),
+                    Esc(c.AgeClass),
+                    c.FindDate.HasValue ? c.FindDate.Value.ToString("yyyy-MM-dd") : "",
+                    c.BodyMassGram.HasValue   ? c.BodyMassGram.Value.ToString("F2")   : "",
+                    c.BodyLengthMm.HasValue   ? c.BodyLengthMm.Value.ToString("F2")   : "",
+                    Esc(tax?.Rank == "Art"     ? tax.Name : null),
+                    Esc(tax?.Rank == "Gattung" ? tax.Name : null),
+                    Esc(tax?.Rank == "Familie" ? tax.Name : null),
+                    Esc(tax?.Rank == "Ordnung" ? tax.Name : null),
+                    Esc(tax?.Rank == "Klasse"  ? tax.Name : null),
+                    Esc(tax?.Rank == "Stamm"   ? tax.Name : null),
+                    Esc(c.Collection?.Name),
+                    Esc(c.FindingLocation?.Name),
+                    Esc(c.Description),
+                    Esc(c.StorageInfo)
+                ));
+            }
+
+            var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+            var fileName = $"sammlung_{DateTime.UtcNow:yyyyMMdd}.csv";
+            return File(bytes, "text/csv; charset=utf-8", fileName);
+        }
+
         //FindDate = c.FindDate.HasValue ? c.FindDate.Value.ToDateTime(TimeOnly.MinValue).ToString("yyyy-MM-dd") : null
         [HttpPost]
         public async Task<ActionResult<CollectItem>> CreateAnimal(CollectItem item)

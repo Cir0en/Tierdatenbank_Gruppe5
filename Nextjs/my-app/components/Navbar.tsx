@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useUser, useAuth } from "@clerk/nextjs";
+import { useLanguage } from "../contexts/LanguageContext";
 
 const API = "http://localhost:5099";
 
@@ -26,6 +27,7 @@ export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
   const { user, isLoaded } = useUser();
   const { isSignedIn, getToken } = useAuth();
+  const { t } = useLanguage();
   const [open, setOpen] = useState(true);
   const [dbRole, setDbRole] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
@@ -313,7 +315,20 @@ export default function Navbar({ activeNav: activeProp }: Props) {
                   <span className="nb-badge-dot" />
                 )}
               </span>
-              {open && <span className="nb-nav-label">{item.label}</span>}
+              {open && (
+                <span className="nb-nav-label">
+                  {({
+                    index:     t.nav.dashboard,
+                    tierliste: t.nav.collections,
+                    karte:     t.nav.map,
+                    leihe:     t.nav.loans,
+                    taxonomie: t.nav.taxonomy,
+                    export:    t.nav.settings,
+                    moderator: t.nav.moderation,
+                    admin:     t.nav.admin,
+                  } as Record<string, string>)[item.id] ?? item.label}
+                </span>
+              )}
               {open && item.id === "index" && notifCount > 0 && (
                 <span className="nb-badge">{notifCount > 99 ? "99+" : notifCount}</span>
               )}

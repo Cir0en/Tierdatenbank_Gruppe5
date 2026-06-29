@@ -290,6 +290,38 @@ public class UsersController : ControllerBase
         });
     }
 
+    // DELETE /api/users/me — eigenes Konto löschen (Selbstlöschung)
+    [HttpDelete("me")]
+    public async Task<IActionResult> DeleteSelf()
+    {
+        var clerkId = User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(clerkId)) return Unauthorized();
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+        if (user == null) return NotFound("Benutzer wurde nicht gefunden.");
+
+        if (user.Role == "Admin")
+            return BadRequest("Als Administrator kannst du dein Konto nicht selbst löschen. Bitte wende dich an einen anderen Admin.");
+
+        var clerkClient = _httpClientFactory.CreateClient("Clerk");
+        var clerkResponse = await clerkClient.DeleteAsync($"users/{Uri.EscapeDataString(user.ClerkId)}");
+
+        if (!clerkResponse.IsSuccessStatusCode && clerkResponse.StatusCode != HttpStatusCode.NotFound)
+            return StatusCode(StatusCodes.Status502BadGateway, "Das Konto konnte bei Clerk nicht gelöscht werden.");
+
+        user.IsBanned = true;
+        user.DeletedAt = DateTime.UtcNow;
+        user.Role = "Nutzer";
+        user.Email = $"deleted-email-{user.Id}@collectio.invalid";
+        user.Username = $"deleted-user-{user.Id}";
+        user.FirstName = null;
+        user.LastName = null;
+        user.Institution = null;
+
+        await _db.SaveChangesAsync();
+        return Ok(new { message = "Dein Konto wurde gelöscht und anonymisiert." });
+    }
+
     // GET /api/users/stats — Systemstatistiken für Admin-Dashboard
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats()

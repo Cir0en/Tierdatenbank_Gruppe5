@@ -7,7 +7,31 @@ import Navbar from '../components/Navbar';
 
 const API = 'http://localhost:5099';
 
-type TabId = 'submissions' | 'requests' | 'reports';
+type TabId = 'submissions' | 'reports';
+
+interface ModStats {
+  taxonomy: { taxPending: number; taxApproved: number; taxRejected: number; taxThisMonth: number };
+  collection: { colTotal: number; colFreigegeben: number; colAusstehend: number; colAbgelehnt: number };
+  loans: { loansTotal: number; loansActive: number; loansOverdue: number };
+  overview: { taxTotal: number; taxSpecies: number };
+  recentDecisions: { id: number; art: string; gattung: string; status: string; moderatorNote: string | null; reviewedAt: string }[];
+}
+
+interface UserActivity {
+  id: number;
+  username: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  role: string | null;
+  createdAt: string | null;
+  taxPending: number;
+  taxApproved: number;
+  taxRejected: number;
+  loansActive: number;
+  loansOverdue: number;
+  lastSubmission: string | null;
+}
 
 interface Submission {
   id: number;
@@ -141,14 +165,17 @@ function ReviewDialog({ modal, onClose, onDone }: {
 
 export default function ModeratorPage() {
   const { user } = useUser();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, getToken } = useAuth();
   const router = useRouter();
 
-  const [tab, setTab]             = useState<TabId>('submissions');
+  const [tab, setTab]               = useState<TabId>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
-  const [modal, setModal]         = useState<ReviewModal | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [modal, setModal]           = useState<ReviewModal | null>(null);
+  const [stats, setStats]           = useState<ModStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [userActivity, setUserActivity] = useState<UserActivity[]>([]);
 
   const currentRole = (user?.publicMetadata?.role as string) ?? '';
 
@@ -173,6 +200,29 @@ export default function ModeratorPage() {
 
   useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
 
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      const [statsRes, usersRes] = await Promise.all([
+        fetch(`${API}/api/stats/moderator`, { headers }),
+        fetch(`${API}/api/stats/moderator/users`, { headers }),
+      ]);
+      if (!statsRes.ok) throw new Error(`HTTP ${statsRes.status}`);
+      setStats(await statsRes.json());
+      if (usersRes.ok) setUserActivity(await usersRes.json());
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    if (tab === 'reports' && !stats) fetchStats();
+  }, [tab, stats, fetchStats]);
+
   const handleDone = (id: number) => {
     setSubmissions(prev => prev.filter(s => s.id !== id));
     setModal(null);
@@ -181,8 +231,7 @@ export default function ModeratorPage() {
   if (!isSignedIn || (currentRole !== 'Moderator' && currentRole !== 'Admin')) return null;
 
   const tabs: { id: TabId; label: string; count?: number }[] = [
-    { id: 'submissions', label: 'Objekte zur Prüfung', count: submissions.length },
-    { id: 'requests',    label: 'Benutzeranfragen' },
+    { id: 'submissions', label: 'Taxonomie-Prüfung', count: submissions.length },
     { id: 'reports',     label: 'Berichte' },
   ];
 
@@ -333,6 +382,77 @@ export default function ModeratorPage() {
         .btn-do-reject:hover:not(:disabled) { background: #b91c1c; }
         .btn-cancel-md:disabled, .btn-do-approve:disabled, .btn-do-reject:disabled { opacity: .6; cursor: not-allowed; }
 
+        /* ── Reports ── */
+        .reports-wrap { display: flex; flex-direction: column; gap: 20px; }
+        .report-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .report-card {
+          background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+          padding: 18px 16px; text-align: center;
+        }
+        .rc-value { font-size: 32px; font-weight: 700; color: #111827; line-height: 1; }
+        .rc-green  { color: #059669; }
+        .rc-red    { color: #dc2626; }
+        .rc-label  { font-size: 12px; font-weight: 600; color: #374151; margin-top: 6px; }
+        .rc-sub    { font-size: 10px; color: #9ca3af; margin-top: 2px; }
+
+        .reports-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .report-section {
+          background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px;
+        }
+        .rs-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 12px; letter-spacing: .03em; }
+        .rs-row {
+          display: flex; align-items: center; justify-content: space-between;
+          font-size: 12px; color: #6b7280; padding: 4px 0;
+          border-bottom: 1px solid #f3f4f6; gap: 8px;
+        }
+        .rs-row:last-of-type { border-bottom: none; }
+        .rs-row strong { color: #111827; font-weight: 600; }
+        .rs-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .rs-dot--green { background: #059669; }
+        .rs-dot--amber { background: #d97706; }
+        .rs-dot--red   { background: #dc2626; }
+        .rs-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #f3f4f6; margin-top: 12px; }
+        .rs-bar-fill { height: 100%; transition: width .3s; }
+        .rs-bar--green { background: #059669; }
+        .rs-bar--amber { background: #d97706; }
+        .rs-bar--red   { background: #dc2626; }
+
+        .rd-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
+        .rd-row:last-child { border-bottom: none; }
+        .rd-badge { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+        .rd-badge--green { background: #d1fae5; color: #059669; }
+        .rd-badge--red   { background: #fee2e2; color: #dc2626; }
+        .rd-name  { font-size: 12px; font-weight: 600; color: #111827; font-style: italic; }
+        .rd-note  { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+        .rd-date  { font-size: 11px; color: #9ca3af; flex-shrink: 0; white-space: nowrap; }
+
+        /* ── User activity table ── */
+        .ua-table { display: flex; flex-direction: column; margin-top: 10px; font-size: 12px; }
+        .ua-head, .ua-row {
+          display: grid;
+          grid-template-columns: 2fr 1fr repeat(5, 60px) 1fr;
+          gap: 8px; align-items: center; padding: 7px 4px;
+        }
+        .ua-head { font-size: 10px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+        .ua-row { border-bottom: 1px solid #f3f4f6; }
+        .ua-row:last-child { border-bottom: none; }
+        .ua-row:hover { background: #f9fafb; border-radius: 6px; }
+        .ua-user { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .ua-avatar { width: 28px; height: 28px; border-radius: 50%; background: #d1fae5; color: #065f46; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .ua-name { display: flex; flex-direction: column; min-width: 0; }
+        .ua-name strong { font-size: 12px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ua-name span { font-size: 10px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ua-role { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+        .ua-role--admin     { background: #fef3c7; color: #92400e; }
+        .ua-role--moderator { background: #dbeafe; color: #1e40af; }
+        .ua-role--nutzer    { background: #f3f4f6; color: #6b7280; }
+        .ua-num { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 99px; font-size: 11px; font-weight: 700; padding: 0 5px; }
+        .ua-num--green { background: #d1fae5; color: #059669; }
+        .ua-num--amber { background: #fef3c7; color: #d97706; }
+        .ua-num--red   { background: #fee2e2; color: #dc2626; }
+        .ua-zero { color: #d1d5db; }
+        .ua-date { font-size: 11px; color: #6b7280; }
+
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #d1fae5; border-radius: 2px; }
       `}</style>
@@ -395,18 +515,131 @@ export default function ModeratorPage() {
               )
             )}
 
-            {tab === 'requests' && (
-              <div className="placeholder-tab">
-                Benutzeranfragen werden hier angezeigt.<br />
-                <span style={{ fontSize: 11, marginTop: 6, display: 'block' }}>Noch nicht implementiert</span>
-              </div>
-            )}
-
             {tab === 'reports' && (
-              <div className="placeholder-tab">
-                Berichte und Statistiken werden hier angezeigt.<br />
-                <span style={{ fontSize: 11, marginTop: 6, display: 'block' }}>Noch nicht implementiert</span>
-              </div>
+              statsLoading ? (
+                <div style={{ color: '#9ca3af', fontSize: 13, padding: 24, textAlign: 'center' }}>Wird geladen…</div>
+              ) : !stats ? (
+                <div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Keine Daten verfügbar</div></div>
+              ) : (
+                <div className="reports-wrap">
+                  {/* Stat cards row */}
+                  <div className="report-cards">
+                    <div className="report-card">
+                      <div className="rc-value">{stats.taxonomy.taxPending}</div>
+                      <div className="rc-label">Ausstehend</div>
+                      <div className="rc-sub">Taxonomie-Einreichungen</div>
+                    </div>
+                    <div className="report-card">
+                      <div className="rc-value rc-green">{stats.taxonomy.taxApproved}</div>
+                      <div className="rc-label">Freigegeben</div>
+                      <div className="rc-sub">Taxonomien gesamt</div>
+                    </div>
+                    <div className="report-card">
+                      <div className="rc-value rc-red">{stats.taxonomy.taxRejected}</div>
+                      <div className="rc-label">Abgelehnt</div>
+                      <div className="rc-sub">Taxonomie-Einreichungen</div>
+                    </div>
+                    <div className="report-card">
+                      <div className="rc-value">{stats.taxonomy.taxThisMonth}</div>
+                      <div className="rc-label">Bearbeitet</div>
+                      <div className="rc-sub">Diesen Monat</div>
+                    </div>
+                  </div>
+
+                  <div className="reports-grid">
+                    {/* Sammlung */}
+                    <div className="report-section">
+                      <div className="rs-title">🗂 Sammlungsobjekte</div>
+                      <div className="rs-row"><span>Gesamt</span><strong>{stats.collection.colTotal}</strong></div>
+                      <div className="rs-row"><span className="rs-dot rs-dot--green" />Freigegeben<strong>{stats.collection.colFreigegeben}</strong></div>
+                      <div className="rs-row"><span className="rs-dot rs-dot--amber" />Ausstehend<strong>{stats.collection.colAusstehend}</strong></div>
+                      <div className="rs-row"><span className="rs-dot rs-dot--red" />Abgelehnt<strong>{stats.collection.colAbgelehnt}</strong></div>
+                      <div className="rs-bar">
+                        <div className="rs-bar-fill rs-bar--green" style={{ width: stats.collection.colTotal ? `${(stats.collection.colFreigegeben / stats.collection.colTotal) * 100}%` : '0%' }} />
+                        <div className="rs-bar-fill rs-bar--amber" style={{ width: stats.collection.colTotal ? `${(stats.collection.colAusstehend / stats.collection.colTotal) * 100}%` : '0%' }} />
+                        <div className="rs-bar-fill rs-bar--red"   style={{ width: stats.collection.colTotal ? `${(stats.collection.colAbgelehnt  / stats.collection.colTotal) * 100}%` : '0%' }} />
+                      </div>
+                    </div>
+
+                    {/* Ausleihen */}
+                    <div className="report-section">
+                      <div className="rs-title">⇄ Ausleihen</div>
+                      <div className="rs-row"><span>Gesamt</span><strong>{stats.loans.loansTotal}</strong></div>
+                      <div className="rs-row"><span className="rs-dot rs-dot--green" />Aktiv<strong>{stats.loans.loansActive}</strong></div>
+                      <div className="rs-row"><span className="rs-dot rs-dot--red" />Überfällig<strong>{stats.loans.loansOverdue}</strong></div>
+                    </div>
+
+                    {/* Taxonomie-Datenbank */}
+                    <div className="report-section">
+                      <div className="rs-title">🌿 Taxonomie-Datenbank</div>
+                      <div className="rs-row"><span>Einträge gesamt</span><strong>{stats.overview.taxTotal}</strong></div>
+                      <div className="rs-row"><span>Davon Arten (Art)</span><strong>{stats.overview.taxSpecies}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Nutzer-Aktivität */}
+                  {userActivity.length > 0 && (
+                    <div className="report-section">
+                      <div className="rs-title">👥 Nutzer-Aktivität</div>
+                      <div className="ua-table">
+                        <div className="ua-head">
+                          <span>Nutzer</span>
+                          <span>Rolle</span>
+                          <span style={{ textAlign: 'center' }}>Eingereicht</span>
+                          <span style={{ textAlign: 'center' }}>Genehmigt</span>
+                          <span style={{ textAlign: 'center' }}>Abgelehnt</span>
+                          <span style={{ textAlign: 'center' }}>Leihen</span>
+                          <span style={{ textAlign: 'center' }}>Überfällig</span>
+                          <span>Letzte Einreichung</span>
+                        </div>
+                        {userActivity.map(u => {
+                          const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username;
+                          const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+                          return (
+                            <div key={u.id} className="ua-row">
+                              <span className="ua-user">
+                                <span className="ua-avatar">{initials}</span>
+                                <span className="ua-name">
+                                  <strong>{name}</strong>
+                                  <span>{u.email}</span>
+                                </span>
+                              </span>
+                              <span><span className={`ua-role ua-role--${(u.role ?? 'nutzer').toLowerCase()}`}>{u.role ?? 'Nutzer'}</span></span>
+                              <span style={{ textAlign: 'center' }}>{u.taxPending > 0 ? <span className="ua-num ua-num--amber">{u.taxPending}</span> : <span className="ua-zero">—</span>}</span>
+                              <span style={{ textAlign: 'center' }}>{u.taxApproved > 0 ? <span className="ua-num ua-num--green">{u.taxApproved}</span> : <span className="ua-zero">—</span>}</span>
+                              <span style={{ textAlign: 'center' }}>{u.taxRejected > 0 ? <span className="ua-num ua-num--red">{u.taxRejected}</span> : <span className="ua-zero">—</span>}</span>
+                              <span style={{ textAlign: 'center' }}>{u.loansActive > 0 ? <span className="ua-num">{u.loansActive}</span> : <span className="ua-zero">—</span>}</span>
+                              <span style={{ textAlign: 'center' }}>{u.loansOverdue > 0 ? <span className="ua-num ua-num--red">{u.loansOverdue}</span> : <span className="ua-zero">—</span>}</span>
+                              <span className="ua-date">{u.lastSubmission ? new Date(u.lastSubmission).toLocaleDateString('de-DE') : <span className="ua-zero">—</span>}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Letzte Entscheidungen */}
+                  {stats.recentDecisions.length > 0 && (
+                    <div className="report-section" style={{ marginTop: 0 }}>
+                      <div className="rs-title">🕐 Letzte Entscheidungen</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+                        {stats.recentDecisions.map(d => (
+                          <div key={d.id} className="rd-row">
+                            <span className={`rd-badge ${d.status === 'approved' ? 'rd-badge--green' : 'rd-badge--red'}`}>
+                              {d.status === 'approved' ? '✓' : '✕'}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div className="rd-name">{d.art} <span style={{ fontWeight: 400, color: '#9ca3af' }}>({d.gattung})</span></div>
+                              {d.moderatorNote && <div className="rd-note">„{d.moderatorNote}"</div>}
+                            </div>
+                            <div className="rd-date">{d.reviewedAt ? new Date(d.reviewedAt).toLocaleDateString('de-DE') : '—'}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
             )}
           </main>
         </div>
