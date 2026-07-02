@@ -72,12 +72,29 @@ export default function HeatmapPage() {
         };
 
         // 3. Den MapTiler Helper nutzen, um die Heatmap hinzuzufügen
+        //
+        // Radius/Intensität sind zoombasiert gestaffelt: bei weiter Ansicht (z.B. ganz
+        // Deutschland) bleiben Einzelfunde klein/blass, während dicht beieinander liegende
+        // Funde (Cluster) sich zu klar erkennbaren Hotspots aufsummieren. Beim Reinzoomen
+        // wachsen Radius und Intensität mit, damit auch einzelne Cluster für sich gut lesbar
+        // bleiben. Mit den bisherigen fixen Werten (radius: 50, intensity: 3.5) sahen
+        // Einzelpunkte bei Weitwinkel-Zoom fast genauso "heiß" aus wie Cluster.
         await helpers.addHeatmap(map, {
             data: geojsonData as any, // Typ-Casting für den Helper
-            // Optionale Einstellungen
-            radius: 50, // Größe der Hitze-Punkte
-            intensity: 3.5, //Erhöht Gewichtung der Einträge, Standard ist 1
-            // blur: 15,   // Verschwimmen der Ränder
+            radius: [
+              { zoom: 4, value: 10 },
+              { zoom: 6, value: 18 },
+              { zoom: 9, value: 30 },
+              { zoom: 12, value: 45 },
+              { zoom: 16, value: 70 },
+            ],
+            intensity: [
+              { zoom: 4, value: 0.6 },
+              { zoom: 6, value: 1 },
+              { zoom: 9, value: 1.5 },
+              { zoom: 12, value: 2 },
+            ],
+            opacity: 0.85,
         });
 
       } catch (err) {
