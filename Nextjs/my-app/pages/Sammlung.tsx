@@ -218,9 +218,9 @@ type LoanUser = { id: number; username: string; firstName: string | null; lastNa
 
 // Modal zum Ausleihen eines einzelnen Sammlungs-Eintrags (Tiers) an einen
 // anderen registrierten Nutzer. Nur für den Owner der Sammlung sichtbar.
-function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
+function LoanAnimalModal({ item, getToken, onClose, onSaved }: {
   item: CollectionItem;
-  clerkUserId: string;
+  getToken: () => Promise<string | null>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -233,13 +233,18 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
   const [error, setError]         = useState<string | null>(null);
 
   // Lädt beim Öffnen des Modals die Liste möglicher Entleiher (alle anderen
-  // Nutzer). Fehler werden bewusst verschluckt — dann bleibt die Auswahl leer.
+  // Nutzer). Auth per Bearer-Token (LoanController erfordert [Authorize]).
+  // Fehler werden bewusst verschluckt — dann bleibt die Auswahl leer.
   useEffect(() => {
-    fetch(`${API}/api/loan/users`, { headers: { 'X-Clerk-User-Id': clerkUserId } })
-      .then(r => r.ok ? r.json() : [])
-      .then(setUsers)
-      .catch(() => {});
-  }, [clerkUserId]);
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const res = await fetch(`${API}/api/loan/users`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setUsers(await res.json());
+      } catch {}
+    })();
+  }, [getToken]);
 
   // Baut einen lesbaren Anzeigenamen (Vor-/Nachname, sonst Username) für die Auswahlliste.
   const displayName = (u: LoanUser) =>
@@ -253,9 +258,13 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
     setSaving(true);
     setError(null);
     try {
+      const token = await getToken();
       const res = await fetch(`${API}/api/loan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ objectId: item.id, borrowerId, startDate, endDate }),
       });
       if (!res.ok) {
@@ -640,12 +649,13 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
 // als Karten-Grid, erlaubt dem Owner das Hinzufügen neuer Tiere und das
 // Ausleihen einzelner Einträge. Ein Klick auf eine Tierkarte navigiert zur
 // Detailseite des Tiers (/tier/[id]).
-function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerkUserId }: {
+function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerkUserId, getToken }: {
   detail: CollectionDetail;
   onBack: () => void;
   onAnimalAdded: () => void;
   isSignedIn?: boolean;
   clerkUserId: string | null;
+  getToken: () => Promise<string | null>;
 }) {
   const router = useRouter();
   const [showAddModal, setShowAddModal]     = useState(false);
@@ -767,7 +777,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
       {loanItem && clerkUserId && (
         <LoanAnimalModal
           item={loanItem}
-          clerkUserId={clerkUserId}
+          getToken={getToken}
           onClose={() => setLoanItem(null)}
           onSaved={() => {
             setLoanItem(null);
@@ -790,11 +800,13 @@ type Tab = 'public' | 'mine';
 // den lokalen `detail`-State umgeschaltet wird (kein eigenes Routing/URL-Wechsel).
 export default function SammlungPage() {
   const { user } = useUser();
-  const { isSignedIn } = useAuth();
-  // clerkUserId wird bei jeder API-Anfrage als 'X-Clerk-User-Id'-Header
-  // mitgeschickt, damit das Backend Owner-Rechte (canEdit/canDelete/isOwner)
-  // korrekt berechnen kann; ist der Nutzer nicht eingeloggt, bleibt er null
-  // und es werden nur öffentlich sichtbare Daten geliefert.
+  const { isSignedIn, getToken } = useAuth();
+  // clerkUserId wird bei jeder Sammlungs-/Objekt-API-Anfrage als
+  // 'X-Clerk-User-Id'-Header mitgeschickt, damit das Backend Owner-Rechte
+  // (canEdit/canDelete/isOwner) korrekt berechnen kann; ist der Nutzer nicht
+  // eingeloggt, bleibt er null und es werden nur öffentlich sichtbare Daten
+  // geliefert. Für die Ausleihe (LoanController, erfordert [Authorize]) wird
+  // stattdessen getToken() für ein Bearer-Token verwendet (siehe CollectionDetailView).
   const clerkUserId = user?.id ?? null;
 
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -1184,6 +1196,7 @@ export default function SammlungPage() {
                 onAnimalAdded={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
                 clerkUserId={clerkUserId}
+                getToken={getToken}
               />
             </>
           )}

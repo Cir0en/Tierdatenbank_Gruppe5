@@ -150,9 +150,6 @@ export default function HomePage() {
   // Lädt alle Daten, die für das Benachrichtigungs-Panel benötigt werden:
   // eigene Rolle, überfällige/aktive Leihen und (für Mod/Admin) ausstehende
   // Taxonomie-Einreichungen. Bricht früh ab, wenn kein Nutzer eingeloggt ist.
-  // Hinweis: Hier werden zwei unterschiedliche Auth-Muster nebeneinander
-  // verwendet — Bearer-Token (getToken()) für /users/me und /taxonomy/*,
-  // aber der 'X-Clerk-User-Id'-Header für /api/loan (siehe auch Sammlung.tsx/leihe.tsx).
   const refreshNotifs = useCallback(async () => {
     if (!clerkId) return;
     try {
@@ -167,9 +164,9 @@ export default function HomePage() {
       const role: string = me.role ?? "Nutzer";
       setUserRole(role);
 
-      // Fetch real loans for overdue/soon notifications
+      // Fetch real loans for overdue/soon notifications (Bearer-Token, LoanController erfordert [Authorize])
       const loanRes = await fetch("http://localhost:5099/api/loan", {
-        headers: { "X-Clerk-User-Id": clerkId },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (loanRes.ok) setNotifLoans(await loanRes.json());
 

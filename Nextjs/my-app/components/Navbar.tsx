@@ -57,7 +57,6 @@ export default function Navbar({ activeNav: activeProp }: Props) {
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !user?.id) return;
     let cancelled = false;
-    const userId = user.id;
 
     const refresh = async () => {
       try {
@@ -76,9 +75,9 @@ export default function Navbar({ activeNav: activeProp }: Props) {
 
         let count = 0;
 
-        // Überfällige Leihen
+        // Überfällige Leihen (Bearer-Token, LoanController erfordert [Authorize])
         const loanRes = await fetch(`${API}/api/loan`, {
-          headers: { "X-Clerk-User-Id": userId },
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (loanRes.ok && !cancelled) {
           const loans: { isOverdue: boolean }[] = await loanRes.json();

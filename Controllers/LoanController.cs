@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
@@ -12,9 +13,14 @@ namespace TodoApi.Controllers;
 /// eine Leihe verändern/löschen. Ausleihe- und Rückgabe-Konflikte werden sowohl auf Anwendungsebene
 /// (Statusprüfung vor dem Insert) als auch durch einen DB-seitigen Unique-Index abgesichert, um
 /// Race-Conditions bei gleichzeitigen Anfragen auszuschließen.
+/// Erfordert eine gültige Clerk-JWT-Authentifizierung (<see cref="AuthorizeAttribute"/>); die
+/// Nutzeridentität wird ausschließlich aus dem validierten "sub"-Claim abgeleitet (siehe
+/// <see cref="GetCurrentUserAsync"/>), damit sich niemand über einen manipulierten Client-Header
+/// als anderer Nutzer ausgeben kann.
 /// </summary>
 [ApiController]
 [Route("api/loan")]
+[Authorize]
 public class LoanController : ControllerBase
 {
     private readonly NeondbContext _context;
@@ -277,11 +283,13 @@ public class LoanController : ControllerBase
 
     // Ermittelt den aktuell angemeldeten Nutzer über den Clerk-Header (Frontend ohne JWT)
     // oder alternativ über das "sub"-Claim des JWT; gibt null zurück, wenn beides fehlt.
+    // Liest die Nutzeridentität ausschließlich aus dem "sub"-Claim des validierten JWT
+    // (durch [Authorize] + JwtBearer-Middleware bereits geprüft). Es gibt bewusst KEINEN
+    // Fallback auf einen Client-Header mehr — ein solcher Header wäre ungeprüft vom Client
+    // frei wählbar und hätte eine Impersonation anderer Nutzer erlaubt.
     private async Task<User?> GetCurrentUserAsync()
     {
-        var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(clerkId))
-            clerkId = User.FindFirst("sub")?.Value;
+        var clerkId = User.FindFirst("sub")?.Value;
         if (string.IsNullOrWhiteSpace(clerkId))
             return null;
         return await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId);

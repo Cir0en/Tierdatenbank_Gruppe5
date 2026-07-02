@@ -123,16 +123,24 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch active loans
-  // Lädt die Leihen des Nutzers per 'X-Clerk-User-Id'-Header (kein Bearer-
-  // Token nötig) und filtert bereits zurückgegebene Leihen heraus, damit nur
+  // Lädt die Leihen des Nutzers per Bearer-Token (LoanController erfordert
+  // [Authorize]) und filtert bereits zurückgegebene Leihen heraus, damit nur
   // aktive/überfällige in der "Aktive Leihen"-Kachel erscheinen.
   useEffect(() => {
     if (!clerkId) return;
-    fetch(`${API}/api/loan`, { headers: { "X-Clerk-User-Id": clerkId } })
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: Loan[]) => setLoans(data.filter((l) => l.status !== "zurückgegeben")))
-      .catch(() => {});
-  }, [clerkId]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const res = await fetch(`${API}/api/loan`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok || cancelled) return;
+        const data: Loan[] = await res.json();
+        if (!cancelled) setLoans(data.filter((l) => l.status !== "zurückgegeben"));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [clerkId, getToken]);
 
   // Fetch role + role-specific notification data
   // Lädt die eigene Rolle per Bearer-Token (getToken()) — hier also ein

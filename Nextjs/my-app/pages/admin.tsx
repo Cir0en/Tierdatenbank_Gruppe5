@@ -220,8 +220,8 @@ export default function AdminPage() {
 
   // Sperrt/entsperrt einen Nutzer über die ban/unban-Endpunkte (Aktion wird
   // anhand des aktuellen isBanned-Werts bestimmt) und aktualisiert die
-  // lokale Liste entsprechend. Hinweis: aktuell gibt es dafür keinen
-  // sichtbaren Button in der Tabelle unten (nur Rolle ändern/Löschen).
+  // lokale Liste entsprechend. Wird über den "Sperren"/"Entsperren"-Button
+  // in der Aktionen-Spalte der Tabelle ausgelöst.
   const handleBanChange = async (
   userId: number,
   currentlyBanned: boolean
@@ -525,6 +525,7 @@ export default function AdminPage() {
                                 <div>
                                   <div className="user-name">
                                     {u.firstName && u.lastName ? `${u.firstName} ${u.lastName}` : u.username}
+                                    {u.isBanned && <span className="rb rb--inactive" style={{ marginLeft: 6 }}>Gesperrt</span>}
                                   </div>
                                   <div className="user-email">{u.email}</div>
                                 </div>
@@ -556,7 +557,16 @@ export default function AdminPage() {
                                   <button className="btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Abbrechen</button>
                                 </div>
                               ) : (
-                                <button className="btn-del" onClick={() => setDeleteConfirm(u.id)}>Löschen</button>
+                                <div className="confirm-btns">
+                                  <button
+                                    className="btn-cancel-sm"
+                                    disabled={saving === u.id}
+                                    onClick={() => handleBanChange(u.id, u.isBanned)}
+                                  >
+                                    {u.isBanned ? 'Entsperren' : 'Sperren'}
+                                  </button>
+                                  <button className="btn-del" disabled={saving === u.id} onClick={() => setDeleteConfirm(u.id)}>Löschen</button>
+                                </div>
                               )}
                             </td>
                           </tr>

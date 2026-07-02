@@ -86,12 +86,12 @@ function StatusPill({ loan }: { loan: Loan }) {
 // Objekte (`objects`, aus /api/loan/my-objects) sowie einen Entleiher
 // (`users`, aus /api/loan/users) und einen Zeitraum aus.
 function CreateLoanModal({
-  objects, users, clerkId,
+  objects, users, getToken,
   onCreated, onClose,
 }: {
   objects: MyObject[];
   users: LoanUser[];
-  clerkId: string;
+  getToken: () => Promise<string | null>;
   onCreated: () => void;
   onClose: () => void;
 }) {
@@ -103,9 +103,9 @@ function CreateLoanModal({
   const [error, setError]           = useState<string | null>(null);
 
   // Validiert die Pflichtfelder und legt die Ausleihe im Backend an. Auth
-  // erfolgt per 'X-Clerk-User-Id'-Header, damit das Backend den Verleiher
-  // (aktueller Nutzer) eindeutig zuordnen kann. Fehler werden dem Nutzer
-  // im Formular angezeigt statt einer Exception.
+  // erfolgt per Bearer-Token (LoanController erfordert [Authorize]), damit
+  // das Backend den Verleiher (aktueller Nutzer) eindeutig und fälschungssicher
+  // zuordnen kann. Fehler werden dem Nutzer im Formular angezeigt statt einer Exception.
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!objectId || !borrowerId || !startDate || !endDate) {
@@ -115,9 +115,13 @@ function CreateLoanModal({
     setSaving(true);
     setError(null);
     try {
+      const token = await getToken();
       const res = await fetch(`${API}/api/loan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Clerk-User-Id": clerkId },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ objectId, borrowerId, startDate, endDate }),
       });
       if (!res.ok) {
@@ -216,7 +220,7 @@ function CreateLoanModal({
 // (eigene Objekte, mögliche Entleiher), bietet Filter nach Rolle/Status und
 // Aktionen zum Statuswechsel bzw. Löschen einzelner Leihen an.
 export default function LeihePage() {
-  const { userId: clerkId } = useAuth();
+  const { userId: clerkId, getToken } = useAuth();
 
   const [loans, setLoans]         = useState<Loan[]>([]);
   const [objects, setObjects]     = useState<MyObject[]>([]);
@@ -228,16 +232,19 @@ export default function LeihePage() {
   const [filterRole, setFilterRole]     = useState<FilterRole>("alle");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("alle");
 
-  // Auth-Header für alle Leihe-Anfragen: Diese Seite nutzt durchgängig das
-  // 'X-Clerk-User-Id'-Header-Muster (statt Bearer-Token), damit das Backend
-  // Verleiher/Entleiher-Zuordnung ohne zusätzlichen Token-Roundtrip auflösen kann.
-  const headers = clerkId ? { "X-Clerk-User-Id": clerkId } : undefined;
+  // Baut den Authorization-Header für alle Leihe-Anfragen (Bearer-Token aus
+  // Clerk) — der LoanController erfordert eine gültige JWT-Authentifizierung
+  // ([Authorize]), ein einfacher Nutzer-Id-Header genügt hier bewusst nicht.
+  const authHeaders = async (): Promise<Record<string, string> | undefined> => {
+    const token = await getToken();
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+  };
 
   // Lädt alle Leihen, an denen der Nutzer als Verleiher oder Entleiher beteiligt ist.
   const fetchLoans = async () => {
     if (!clerkId) return;
     try {
-      const res = await fetch(`${API}/api/loan`, { headers });
+      const res = await fetch(`${API}/api/loan`, { headers: await authHeaders() });
       if (res.ok) setLoans(await res.json());
       else setActionError(`Fehler ${res.status} — Leihen konnten nicht geladen werden.`);
     } catch {
@@ -252,6 +259,7 @@ export default function LeihePage() {
   const fetchSupportData = async () => {
     if (!clerkId) return;
     try {
+      const headers = await authHeaders();
       const [objRes, usrRes] = await Promise.all([
         fetch(`${API}/api/loan/my-objects`, { headers }),
         fetch(`${API}/api/loan/users`, { headers }),
@@ -277,9 +285,10 @@ export default function LeihePage() {
     if (!clerkId) return;
     setActionError(null);
     try {
+      const auth = await authHeaders();
       const res = await fetch(`${API}/api/loan/${loanId}/status`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "X-Clerk-User-Id": clerkId },
+        headers: { "Content-Type": "application/json", ...auth },
         body: JSON.stringify({ status }),
       });
       if (!res.ok) {
@@ -301,7 +310,7 @@ export default function LeihePage() {
     try {
       const res = await fetch(`${API}/api/loan/${loanId}`, {
         method: "DELETE",
-        headers: { "X-Clerk-User-Id": clerkId },
+        headers: await authHeaders(),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -654,7 +663,7 @@ export default function LeihePage() {
         <CreateLoanModal
           objects={objects}
           users={users}
-          clerkId={clerkId}
+          getToken={getToken}
           onCreated={() => { setShowModal(false); fetchLoans(); }}
           onClose={() => setShowModal(false)}
         />
