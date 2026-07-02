@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
@@ -226,6 +227,7 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
 
 export default function MapPage() {
   const { isSignedIn, userId } = useAuth();
+  const router = useRouter();
   const isSignedInRef = useRef(isSignedIn);
   const userIdRef     = useRef(userId);
 
@@ -258,15 +260,22 @@ export default function MapPage() {
   }, []);
 
   useEffect(() => {
-    if (!mapContainer.current || mapInstance.current) return;
+    if (!mapContainer.current || mapInstance.current || !router.isReady) return;
 
     config.apiKey = process.env.NEXT_PUBLIC_MAP_API_KEY as string;
+
+    const qLng  = parseFloat(router.query.lng as string);
+    const qLat  = parseFloat(router.query.lat as string);
+    const qZoom = parseFloat(router.query.zoom as string);
+    const initialCenter: [number, number] =
+      !isNaN(qLng) && !isNaN(qLat) ? [qLng, qLat] : [8.0020, 50.9411];
+    const initialZoom = !isNaN(qZoom) ? qZoom : 5;
 
     const map = new Map({
       container: mapContainer.current,
       style: MapStyle.STREETS,
-      center: [8.0020, 50.9411],
-      zoom: 5,
+      center: initialCenter,
+      zoom: initialZoom,
     });
     mapInstance.current = map;
 
@@ -345,7 +354,14 @@ export default function MapPage() {
     return () => {
       if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; }
     };
-  }, []);
+  }, [router.isReady]);
+
+  const goToHeatmap = () => {
+    const map = mapInstance.current;
+    if (!map) { router.push('/heatmap'); return; }
+    const c = map.getCenter();
+    router.push(`/heatmap?lng=${c.lng}&lat=${c.lat}&zoom=${map.getZoom()}`);
+  };
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh' }}>
@@ -353,6 +369,10 @@ export default function MapPage() {
 
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+
+        <button className="view-switch-btn" onClick={goToHeatmap} title="Zur Heatmap wechseln">
+          🔥 Heatmap
+        </button>
 
         {/* Panel ist position:fixed → bricht aus overflow:hidden des Elternelements aus */}
         {formOpen && formCoords && (
@@ -369,6 +389,19 @@ export default function MapPage() {
         )}
 
         <style jsx global>{`
+          /* ── View-Switch-Button ── */
+          .view-switch-btn {
+            position: absolute; top: 12px; right: 56px; z-index: 500;
+            display: flex; align-items: center; gap: 6px;
+            background: rgba(255,255,255,.92); border: 1px solid #dadce0;
+            border-radius: 20px; padding: 7px 14px;
+            font-size: 12px; font-weight: 600; color: #202124;
+            font-family: 'Inter', system-ui, sans-serif; cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,.18);
+            transition: background .15s, transform .15s;
+          }
+          .view-switch-btn:hover { background: #fff; transform: translateY(-1px); }
+
           /* ── Marker ── */
           .custom-marker { pointer-events: auto; cursor: pointer; }
           .markerBody {
