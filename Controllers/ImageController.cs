@@ -5,6 +5,12 @@ using TodoApi.Models;
 
 namespace TodoApi.Controllers
 {
+    /// <summary>
+    /// Verwaltet Bild-Uploads für Fundobjekte (CollectItems). Bilder werden als Dateien im
+    /// lokalen "uploads"-Verzeichnis gespeichert, in der DB wird nur der relative Pfad (ImageUrl)
+    /// referenziert. Aktuell gilt ein 1-Bild-Limit pro Objekt: ein neuer Upload ersetzt ein
+    /// vorhandenes Bild. Alle Endpunkte sind aktuell mit [AllowAnonymous] offen.
+    /// </summary>
     [ApiController]
     [Route("api/images")]
     public class ImageController : ControllerBase
@@ -12,6 +18,7 @@ namespace TodoApi.Controllers
         private readonly NeondbContext _context;
         private readonly IWebHostEnvironment _env;
 
+        // erlaubte MIME-Types für Uploads, um beliebige Dateitypen (z.B. ausführbare Dateien) auszuschließen
         private static readonly string[] AllowedTypes =
             ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
@@ -21,7 +28,7 @@ namespace TodoApi.Controllers
             _env = env;
         }
 
-        // GET /api/images/{animalId}
+        // GET /api/images/{animalId} — listet alle Bilder eines Fundobjekts (chronologisch nach Upload-Datum)
         [HttpGet("{animalId:int}")]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<object>>> GetImages(int animalId)
@@ -35,7 +42,8 @@ namespace TodoApi.Controllers
             return Ok(images);
         }
 
-        // POST /api/images/upload/{animalId}
+        // POST /api/images/upload/{animalId} — lädt ein Bild für ein Fundobjekt hoch (max. 10 MB).
+        // Ersetzt ein evtl. vorhandenes Bild des Objekts (1-Bild-Limit pro Objekt).
         [HttpPost("upload/{animalId:int}")]
         [AllowAnonymous]
         [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
@@ -50,7 +58,8 @@ namespace TodoApi.Controllers
             var exists = await _context.CollectItems.AnyAsync(c => c.Id == animalId);
             if (!exists) return NotFound("Tier nicht gefunden.");
 
-            // Vorhandenes Bild löschen (1-Bild-Limit)
+            // Vorhandenes Bild löschen (1-Bild-Limit): sowohl Datei auf der Festplatte
+            // als auch den zugehörigen DB-Eintrag entfernen, bevor das neue Bild gespeichert wird
             var existing = await _context.ObjectImages.FirstOrDefaultAsync(i => i.ObjectId == animalId);
             if (existing != null)
             {
@@ -63,6 +72,7 @@ namespace TodoApi.Controllers
             var folder = Path.Combine(_env.ContentRootPath, "uploads", animalId.ToString());
             Directory.CreateDirectory(folder);
 
+            // Zufälliger Dateiname (GUID) statt Originalname, um Kollisionen und Pfad-/Namenskonflikte zu vermeiden
             var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
             var filename = $"{Guid.NewGuid()}{ext}";
             var filePath = Path.Combine(folder, filename);
@@ -84,7 +94,7 @@ namespace TodoApi.Controllers
             return Ok(new { image.Id, image.ImageUrl, image.CreatedAt });
         }
 
-        // DELETE /api/images/{imageId}
+        // DELETE /api/images/{imageId} — löscht ein Bild sowohl aus der Datenbank als auch von der Festplatte
         [HttpDelete("{imageId:int}")]
         [AllowAnonymous]
         public async Task<IActionResult> DeleteImage(int imageId)

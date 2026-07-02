@@ -1,3 +1,7 @@
+// Route /karte: interaktive Karten-Ansicht (MapTiler) zur Erfassung und Anzeige
+// von Fundorten. Angemeldete Nutzer können per Klick auf die Karte ein neues Tier
+// mit Koordinaten anlegen (TierFormPanel); alle Besucher sehen bereits erfasste
+// Tiere als Marker. Bietet außerdem einen Wechsel zur Heatmap-Ansicht (pages/heatmap.tsx).
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,6 +20,12 @@ interface CollectionOption { id: number; name: string; isPublic: boolean; }
 
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
 
+// Formular-Panel, das sich öffnet, wenn ein angemeldeter Nutzer auf die Karte
+// klickt. Erfasst die Tierdaten (Name, Kategorie, Maße, ...) für die zuvor per
+// Klick ermittelten Koordinaten (coords) und legt bei Bestätigung einen neuen
+// Datensatz über die Animals-API an. Lädt außerdem die eigenen (Owner-)Sammlungen
+// des Nutzers nach, damit das neue Tier optional direkt einer Sammlung zugeordnet
+// werden kann.
 function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
   taxonomies: TaxonomyOption[];
   coords: { lng: number; lat: number };
@@ -50,6 +60,10 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
       .catch(() => {});
   }, [userId]);
 
+  // Validiert minimal (Artname erforderlich) und legt das neue Tier inkl.
+  // Koordinaten per POST an. Bei Erfolg wird onSaved() aufgerufen, damit die
+  // Elternkomponente (MapPage) direkt einen Marker an der geklickten Position
+  // ergänzen kann, ohne die komplette Marker-Liste neu laden zu müssen.
   const handleSave = async () => {
     if (!name.trim()) { setNameErr(true); return; }
     setSaving(true);
@@ -228,6 +242,11 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
 export default function MapPage() {
   const { isSignedIn, userId } = useAuth();
   const router = useRouter();
+  // isSignedIn/userId werden zusätzlich in Refs gespiegelt, damit die weiter
+  // unten registrierten MapTiler-Event-Handler (map.on('click'/'load')) beim
+  // Auslösen immer den aktuellen Auth-Status lesen können, ohne dass die Karte
+  // bei jeder Auth-Änderung neu initialisiert werden muss (die Handler werden
+  // nur einmalig beim Mounten registriert, siehe Effekt weiter unten).
   const isSignedInRef = useRef(isSignedIn);
   const userIdRef     = useRef(userId);
 
@@ -259,11 +278,21 @@ export default function MapPage() {
       .catch(() => {});
   }, []);
 
+  // Initialisiert die MapTiler-Karte genau einmal (sobald der Container im DOM
+  // ist und die Next.js-Route/-Query bereit ist) und registriert alle
+  // Karten-Event-Handler (Klick zum Erfassen, Laden bestehender Marker aus der DB).
+  // Läuft absichtlich nur bei router.isReady erneut, NICHT bei jeder Auth-Änderung,
+  // damit die Karte nicht ständig neu aufgebaut wird (siehe Refs oben).
   useEffect(() => {
     if (!mapContainer.current || mapInstance.current || !router.isReady) return;
 
+    // MapTiler-API-Key aus den Umgebungsvariablen setzen (clientseitig verfügbar
+    // dank NEXT_PUBLIC_-Präfix)
     config.apiKey = process.env.NEXT_PUBLIC_MAP_API_KEY as string;
 
+    // Kartenposition aus optionalen Query-Parametern übernehmen (z.B. beim
+    // Zurückwechseln von der Heatmap-Ansicht, siehe goToHeatmap), sonst
+    // Standard-Zentrum/-Zoom (Deutschland-Mitte) verwenden.
     const qLng  = parseFloat(router.query.lng as string);
     const qLat  = parseFloat(router.query.lat as string);
     const qZoom = parseFloat(router.query.zoom as string);
@@ -280,6 +309,8 @@ export default function MapPage() {
     mapInstance.current = map;
 
     // ── Marker-Element erstellen ─────────────────────────────────────────
+    // Baut das DOM-Element für einen einzelnen Karten-Marker: zeigt ein
+    // Geschlechts-Symbol (♂/♀/◉ falls unbekannt) sowie den Artnamen als Label an.
     const createMarkerElement = (artname: string, geschlecht?: string) => {
       const el = document.createElement('div');
       el.className = 'custom-marker';
@@ -301,6 +332,8 @@ export default function MapPage() {
     };
 
     // ── Klick auf Karte ──────────────────────────────────────────────────
+    // Nicht angemeldete Nutzer erhalten stattdessen einen Hinweis-Popup mit
+    // Login-Link; angemeldete Nutzer öffnen über openFormRef das Erfassungs-Panel.
     map.on('click', (e) => {
       const { lng, lat } = e.lngLat;
 
@@ -322,6 +355,10 @@ export default function MapPage() {
     });
 
     // ── Vorhandene Tiere aus DB als Marker laden ─────────────────────────
+    // Sobald die Karte fertig geladen ist, werden alle bereits erfassten
+    // Fundorte per API abgerufen und als klickbare Marker (Link zur Detailseite
+    // /tier/[id]) auf die Karte gesetzt. Angemeldete Nutzer schicken ihre
+    // Clerk-User-ID mit (z.B. relevant für private/eigene Sammlungsobjekte).
     map.on('load', async () => {
       try {
         const headers: Record<string, string> = {};
@@ -356,6 +393,9 @@ export default function MapPage() {
     };
   }, [router.isReady]);
 
+  // Wechselt zur Heatmap-Ansicht und gibt dabei das aktuelle Kartenzentrum/-zoom
+  // als Query-Parameter mit, damit die Heatmap an derselben Stelle startet statt
+  // wieder beim Standard-Ausschnitt.
   const goToHeatmap = () => {
     const map = mapInstance.current;
     if (!map) { router.push('/heatmap'); return; }

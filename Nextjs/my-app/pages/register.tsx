@@ -1,11 +1,17 @@
+// Route /register: Registrierungsseite für neue Nutzerkonten.
+// Nutzt Clerk (useSignUp) zum Anlegen des Kontos; die gewählte Rolle wird als
+// "requestedRole" in Clerks unsafeMetadata mitgegeben und muss serverseitig
+// (nach Freigabe durch Moderation) final bestätigt werden.
 'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useAuth, useClerk } from '@clerk/nextjs'; 
+import { useAuth, useClerk } from '@clerk/nextjs';
 import { useRouter } from 'next/router';
 import { useSignUp } from '@clerk/nextjs/legacy';
 
+// Einfache Heuristik zur Passwortstärke-Anzeige (0-4 Punkte): Länge >= 8,
+// Großbuchstabe, Ziffer, Sonderzeichen. Rein UI-Feedback, keine harte Validierung.
 function calcStrength(pw: string) {
   let s = 0;
   if (pw.length >= 8) s++;
@@ -34,6 +40,7 @@ export default function RegisterPage() {
   const [success, setSuccess]     = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
+  // Bereits angemeldete Nutzer sollen die Registrierungsseite nicht sehen -> weiterleiten
   useEffect(() => {
     if (isSignedIn) {
       router.push('/dashboard');
@@ -43,15 +50,20 @@ export default function RegisterPage() {
   if (isSignedIn) {
   return null;}
 
+  // Abgeleitete Validierungs-/Anzeige-Werte, bei jedem Render neu berechnet
   const strength   = calcStrength(password);
   const pwMatch    = confirm.length > 0 && password === confirm;
   const pwMismatch = confirm.length > 0 && password !== confirm;
   const canSubmit  = name.trim() && email.includes('@') && strength >= 2 && pwMatch && role && agree;
 
+  // Darstellung der Passwortstärke-Anzeige (Breite/Farbe/Label je nach Stärke-Stufe)
   const STRENGTH_W     = ['0%', '25%', '50%', '75%', '100%'];
   const STRENGTH_COLOR = ['#e5e7eb', '#ef4444', '#f97316', '#eab308', '#22c55e'];
   const STRENGTH_LABEL = ['', 'Sehr schwach', 'Schwach', 'Mittel', 'Stark'];
 
+  // Clerk erwartet getrennte firstName/lastName-Felder; das Formular erfasst
+  // aber nur einen einzigen "Vollständiger Name"-Text-Input. Diese Funktion
+  // teilt den eingegebenen Namen am ersten Leerzeichen in Vor- und Nachname.
   const splitFullName = (fullName: string) => {
     const parts = fullName.trim().split(/\s+/);
     return {
@@ -60,10 +72,17 @@ export default function RegisterPage() {
     };
   };
 
+  // Verarbeitet das Registrierungsformular über Clerks signUp-API.
+  // Die gewünschte Rolle wird als unsafeMetadata.requestedRole mitgeschickt (muss
+  // später von einem Moderator/Admin bestätigt werden, siehe Erfolgsmeldung unten).
+  // Ist die Registrierung sofort abgeschlossen, wird die Session aktiviert und zum
+  // Dashboard weitergeleitet; andernfalls (z.B. E-Mail-Verifizierung nötig) wird
+  // ein Fehler-/Hinweistext angezeigt, da dieser Zwischenschritt hier nicht
+  // separat abgebildet wird.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || !isLoaded || !signUp) return;
-    
+
     setLoading(true);
     setErrorMsg('');
 
@@ -94,7 +113,7 @@ export default function RegisterPage() {
         });
         setErrorMsg('Registrierung konnte nicht abgeschlossen werden.');
       }
-      
+
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.errors?.[0]?.longMessage || 'Ein Fehler ist bei der Registrierung aufgetreten.');

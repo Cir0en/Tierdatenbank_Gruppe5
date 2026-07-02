@@ -6,6 +6,13 @@ using Npgsql;
 
 namespace TodoApi.Controllers;
 
+/// <summary>
+/// Verwaltet Ausleihen (Loans) von Fundobjekten zwischen Nutzern. Ein Objekt kann jeweils nur
+/// von seinem Eigentümer (über die zugehörige Collection) verliehen werden; nur der Verleiher darf
+/// eine Leihe verändern/löschen. Ausleihe- und Rückgabe-Konflikte werden sowohl auf Anwendungsebene
+/// (Statusprüfung vor dem Insert) als auch durch einen DB-seitigen Unique-Index abgesichert, um
+/// Race-Conditions bei gleichzeitigen Anfragen auszuschließen.
+/// </summary>
 [ApiController]
 [Route("api/loan")]
 public class LoanController : ControllerBase
@@ -44,6 +51,7 @@ public class LoanController : ControllerBase
                 StartDate  = l.StartDate,
                 EndDate    = l.EndDate,
                 Status     = l.Status,
+                // überfällig: Leihe ist noch offen, hat ein Enddatum und dieses liegt in der Vergangenheit
                 IsOverdue  = l.Status == "offen" && l.EndDate != null && l.EndDate < today
             })
             .OrderByDescending(l => l.Id)
@@ -79,6 +87,7 @@ public class LoanController : ControllerBase
                 StartDate  = l.StartDate,
                 EndDate    = l.EndDate,
                 Status     = l.Status,
+                // überfällig: Leihe ist noch offen, hat ein Enddatum und dieses liegt in der Vergangenheit
                 IsOverdue  = l.Status == "offen" && l.EndDate != null && l.EndDate < today
             })
             .FirstOrDefaultAsync();
@@ -136,6 +145,7 @@ public class LoanController : ControllerBase
         if (obj == null)
             return NotFound(new { message = "Objekt nicht gefunden." });
 
+        // nur der Eigentümer der Sammlung, in der sich das Objekt befindet, darf es verleihen
         if (obj.Collection?.UserId != currentUser.Id)
             return Forbid();
 
@@ -265,6 +275,8 @@ public class LoanController : ControllerBase
         return NoContent();
     }
 
+    // Ermittelt den aktuell angemeldeten Nutzer über den Clerk-Header (Frontend ohne JWT)
+    // oder alternativ über das "sub"-Claim des JWT; gibt null zurück, wenn beides fehlt.
     private async Task<User?> GetCurrentUserAsync()
     {
         var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();

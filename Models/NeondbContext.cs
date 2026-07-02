@@ -36,6 +36,8 @@ public partial class NeondbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Fremdschlüssel-Verhalten: Löschen der Collection löscht auch ihre Items (Cascade),
+        // während das Löschen von Fundort oder Taxonomie die Items nur "entkoppelt" (SetNull).
         modelBuilder.Entity<CollectItem>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("collect_items_pkey");
@@ -80,6 +82,7 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("collect_items_taxonomy_id_fkey");
         });
 
+        // Löschen des Besitzer-Users löscht auch dessen Sammlungen (Cascade).
         modelBuilder.Entity<Collection>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("collections_pkey");
@@ -100,6 +103,8 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("collections_user_id_fkey");
         });
 
+        // ExternalId ist eindeutig (Unique-Index); Parent-Fremdschlüssel nutzt Restrict, damit
+        // Standorte mit Kind-Knoten nicht versehentlich mitsamt ihrer Hierarchie gelöscht werden.
         modelBuilder.Entity<GeoLocation>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("geo_locations_pkey");
@@ -168,6 +173,7 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("loans_object_id_fkey");
         });
 
+        // Löschen des zugehörigen CollectItems löscht auch dessen Bilder (Cascade).
         modelBuilder.Entity<ObjectImage>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("object_images_pkey");
@@ -187,6 +193,9 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("object_images_object_id_fkey");
         });
 
+        // Name+ParentId ist zusammen eindeutig (verhindert doppelte Kind-Knoten mit gleichem Namen
+        // unter demselben Eltern-Knoten). Parent-Fremdschlüssel nutzt Restrict (kein Kaskaden-Löschen
+        // ganzer Taxonomie-Teilbäume); CreatedBy nutzt SetNull, falls der anlegende User gelöscht wird.
         modelBuilder.Entity<Taxonomy>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("taxonomy_pkey");
@@ -217,6 +226,8 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("taxonomy_parent_id_fkey");
         });
 
+        // Keine Fremdschlüssel-Constraints hier definiert (CreatedBy/ReviewedBy sind reine
+        // User-Id-Referenzen ohne EF-Navigation/-Konstraint auf DB-Ebene).
         modelBuilder.Entity<TaxonomySubmission>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("taxonomy_submissions_pkey");
@@ -242,6 +253,8 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
         });
 
+        // ClerkId, Email und Username sind jeweils eindeutig (Unique-Indizes), da sie zur
+        // Identifikation/zum Login-Abgleich mit Clerk bzw. zur Anzeige dienen.
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("users_pkey");

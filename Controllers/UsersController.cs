@@ -8,6 +8,13 @@ using TodoApi.DTOs;
 
 namespace TodoApi.Controllers;
 
+/// <summary>
+/// Verwaltet Benutzerkonten: eigene Rolle abfragen, Nutzerliste, Rollenänderung, Sperren/Entsperren
+/// sowie Löschen (Soft-Delete/Anonymisierung). Erfordert grundsätzlich Anmeldung ([Authorize]);
+/// die meisten administrativen Aktionen (Rolle ändern, sperren, löschen) sind zusätzlich auf die
+/// Rolle Admin beschränkt (siehe <see cref="GetCurrentAdminAsync"/>). Rollen-/Sperr-/Löschänderungen
+/// werden immer sowohl lokal in der DB als auch bei Clerk (Auth-Provider) synchronisiert.
+/// </summary>
 [ApiController]
 [Route("api/users")]
 [Authorize]
@@ -23,6 +30,8 @@ public class UsersController : ControllerBase
         _httpClientFactory = httpClientFactory;
     }
 
+    // Ermittelt den aktuell angemeldeten Nutzer und prüft, ob er die Rolle Admin hat sowie
+    // weder gebannt noch (soft-)gelöscht ist. Gibt null zurück, wenn keine Admin-Berechtigung besteht.
     private async Task<User?> GetCurrentAdminAsync()
     {
         var clerkId = User.FindFirst("sub")?.Value;
@@ -83,7 +92,10 @@ public class UsersController : ControllerBase
         return Ok(users);
     }
 
-    // PUT /api/users/{id}/role — Rolle ändern (nur Admin)
+    // PUT /api/users/{id}/role — Rolle ändern (nur Admin). Erlaubt sind nur die drei bekannten
+    // Rollen; Admins dürfen ihre eigene Rolle nicht ändern (um sich nicht versehentlich selbst
+    // die Admin-Rechte zu entziehen). Die Rolle wird zusätzlich in Clerk (public_metadata) gespiegelt,
+    // damit sie z.B. im JWT/Frontend konsistent verfügbar ist.
     [HttpPut("{id:int}/role")]
     public async Task<IActionResult> UpdateRole(int id, [FromBody] UpdateRoleDto dto)
     {
@@ -91,6 +103,7 @@ public class UsersController : ControllerBase
         if (admin == null)
             return Forbid();
 
+        // Whitelist gültiger Rollen (case-insensitive), um beliebige/fehlerhafte Werte abzulehnen
         var allowedRoles = new Dictionary<string, string>(
             StringComparer.OrdinalIgnoreCase)
         {
@@ -105,7 +118,7 @@ public class UsersController : ControllerBase
             return BadRequest("Ungültige Rolle.");
         }
 
-        var targetUser = await _db.Users.FindAsync(id); // variable user zu targetUser ubenannt, 
+        var targetUser = await _db.Users.FindAsync(id); // variable user zu targetUser ubenannt,
                                                         // für Verständlichkeit
         if (targetUser == null) return NotFound("Benutzer wurde nicht gefunden.");
 
@@ -140,7 +153,9 @@ public class UsersController : ControllerBase
         return Ok(new { targetUser.Id, targetUser.Role });
     }
 
-    // POST /api/users/{id}/ban
+    // POST /api/users/{id}/ban — sperrt einen Nutzer (nur Admin). Admins können sich weder selbst
+    // noch andere Admins sperren (ein Admin muss vorher heruntergestuft werden); Sperrung wird
+    // zusätzlich bei Clerk durchgeführt, damit der Nutzer sich dort nicht mehr anmelden kann.
     [HttpPost("{id:int}/ban")]
     public async Task<IActionResult> BanUser(int id)
     {
@@ -190,7 +205,8 @@ public class UsersController : ControllerBase
         });
     }
 
-    // POST /api/users/{id}/unban
+    // POST /api/users/{id}/unban — hebt die Sperrung eines Nutzers auf (nur Admin), sowohl lokal
+    // als auch bei Clerk.
     [HttpPost("{id:int}/unban")]
     public async Task<IActionResult> UnbanUser(int id)
     {
@@ -231,7 +247,9 @@ public class UsersController : ControllerBase
         });
     }
 
-    // DELETE /api/users/{id} — Benutzer löschen (nur Admin)
+    // DELETE /api/users/{id} — Benutzer löschen (nur Admin). Kein Hard-Delete: der Nutzer wird bei
+    // Clerk entfernt, lokal aber nur anonymisiert (Soft-Delete), damit verknüpfte Daten (Sammlungen,
+    // Funde, Ausleihen usw.) nicht mitgelöscht werden bzw. verwaisen.
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteUser(int id)
     {
@@ -268,9 +286,12 @@ public class UsersController : ControllerBase
                 "Der Benutzer konnte in Clerk nicht gelöscht werden.");
         }
 
-        // zum Löschen vielleich lieber "unechte" Löschung = Daten auf Null setzen. 
+        // zum Löschen vielleich lieber "unechte" Löschung = Daten auf Null setzen.
         // Ansonsten werden alle Einträge - Collections, Funde usw. mitgelöscht
 
+        // Anonymisierung: persönliche Daten werden überschrieben/entfernt, DeletedAt markiert den
+        // Account als gelöscht (wird u.a. in GetCurrentAdminAsync/-User-Abfragen berücksichtigt),
+        // Rolle wird auf die niedrigste Stufe zurückgesetzt.
         targetUser.IsBanned = true;
         targetUser.DeletedAt = DateTime.UtcNow;
         targetUser.Role = "Nutzer";
@@ -290,7 +311,9 @@ public class UsersController : ControllerBase
         });
     }
 
-    // DELETE /api/users/me — eigenes Konto löschen (Selbstlöschung)
+    // DELETE /api/users/me — eigenes Konto löschen (Selbstlöschung, für jeden angemeldeten Nutzer).
+    // Admins können sich nicht selbst löschen (müssen zuerst von einem anderen Admin heruntergestuft
+    // werden), sonst gleiche Anonymisierungslogik wie bei DeleteUser.
     [HttpDelete("me")]
     public async Task<IActionResult> DeleteSelf()
     {

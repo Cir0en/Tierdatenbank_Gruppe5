@@ -1,9 +1,13 @@
+// Route /login: Anmeldeseite der Anwendung.
+// Nutzt Clerk (useSignIn) für den eigentlichen Auth-Flow und unterstützt sowohl
+// klassisches E-Mail/Passwort-Login als auch OAuth-Login (z.B. Google) via Redirect.
+// Bereits angemeldete Nutzer werden automatisch zur Startseite weitergeleitet.
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useAuth, useClerk } from '@clerk/nextjs'; 
+import { useAuth, useClerk } from '@clerk/nextjs';
 import { useSignIn } from '@clerk/nextjs/legacy';
 
 export default function LoginPage() {
@@ -28,6 +32,7 @@ export default function LoginPage() {
     }
   }, []);
 
+  // Bereits angemeldete Nutzer sollen die Login-Seite nicht sehen -> zur Startseite leiten
   useEffect(() => {
     if (isSignedIn) {
       router.push('/');
@@ -38,10 +43,16 @@ export default function LoginPage() {
     return null;
   }
 
+  // Verarbeitet das Login-Formular (E-Mail + Passwort) über Clerks signIn-API.
+  // Ablauf: signIn.create() versucht die Anmeldung; ist sie sofort abgeschlossen
+  // (kein zusätzlicher Schritt wie MFA nötig), wird die neue Session mit
+  // setActive() aktiviert und zur Startseite weitergeleitet. Andernfalls (z.B.
+  // wenn Clerk weitere Schritte verlangt) wird das dem Nutzer als Fehlermeldung
+  // angezeigt, da dieser Flow hier nicht weiter behandelt wird.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isLoaded || !signIn) return;
-    
+
     setLoading(true);
     setErrorMsg('');
 
@@ -62,7 +73,7 @@ export default function LoginPage() {
         });
         setErrorMsg('Login konnte noch nicht abgeschlossen werden.');
       }
-      
+
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.errors?.[0]?.longMessage || 'Login fehlgeschlagen. Bitte prüfe deine Daten.');
@@ -71,6 +82,9 @@ export default function LoginPage() {
     }
   };
 
+  // Startet den OAuth-Login (z.B. "Weiter mit Google"): Clerk leitet den Browser
+  // zum Provider und danach zur /sso-callback-Seite weiter, welche die Anmeldung
+  // abschließt und den Nutzer letztlich zu redirectUrlComplete ("/") schickt.
   const handleOAuth = (provider: 'oauth_google' | 'oauth_microsoft') => {
     if (!signIn) return;
     (signIn as any).authenticateWithRedirect({

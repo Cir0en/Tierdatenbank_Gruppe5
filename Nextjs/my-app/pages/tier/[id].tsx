@@ -1,3 +1,7 @@
+// Route /tier/[id]: Detailseite für ein einzelnes Sammlungsobjekt (Tier).
+// Zeigt Stammdaten (Taxonomie, Fundort, Maße, Status/Seltenheit etc.) sowie ein
+// zugehöriges Foto an und erlaubt das Hochladen/Ersetzen/Löschen dieses Fotos.
+// Die Tier-ID kommt aus dem dynamischen Next.js-Routenparameter `id`.
 'use client';
 
 import { useRouter } from 'next/router';
@@ -30,6 +34,9 @@ interface AnimalImage {
   createdAt: string | null;
 }
 
+// Ordnet den Seltenheits-/Status-Text einem passenden Badge-Farbschema
+// (Hintergrund/Text) zu, damit z.B. "Stark gefährdet" optisch anders hervorsticht
+// als "Häufig". Unbekannte/fehlende Werte erhalten ein neutrales Grau.
 function statusBadge(status: string | null) {
   switch ((status ?? '').toLowerCase()) {
     case 'häufig':
@@ -43,6 +50,9 @@ function statusBadge(status: string | null) {
   }
 }
 
+// Lokale Formatierungs-Hilfsfunktion (unabhängig von utils/date.ts): formatiert
+// ein beliebiges Datum-String ins deutsche Anzeigeformat TT.MM.JJJJ.
+// Fängt ungültige Datumswerte ab und gibt dann den Rohwert unverändert zurück.
 function formatDate(d: string | null): string | null {
   if (!d) return null;
   try {
@@ -65,6 +75,8 @@ export default function TierDetailPage() {
   const [imgError, setImgError]     = useState<string | null>(null);
   const [uploading, setUploading]   = useState(false);
 
+  // Lädt die Stammdaten des Tieres, sobald die Routen-ID verfügbar ist
+  // (z.B. erst nach der Client-seitigen Hydration von router.query gültig)
   useEffect(() => {
     if (!animalId) return;
     setLoading(true);
@@ -75,6 +87,9 @@ export default function TierDetailPage() {
       .catch((err: Error) => { setError(err.message); setLoading(false); });
   }, [animalId]);
 
+  // Lädt das (erste) zugehörige Foto des Tieres. Als useCallback definiert, damit
+  // die Funktion sowohl im Lade-Effekt unten als auch nach Upload/Löschen erneut
+  // aufgerufen werden kann, ohne die Referenz bei jedem Render neu zu erzeugen.
   const loadImage = useCallback(async () => {
     if (!animalId) return;
     setImgLoading(true);
@@ -93,6 +108,8 @@ export default function TierDetailPage() {
 
   useEffect(() => { loadImage(); }, [loadImage]);
 
+  // Lädt eine ausgewählte Bilddatei per FormData/multipart-Upload hoch und
+  // aktualisiert danach die Bildanzeige durch erneutes Laden (loadImage).
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !animalId) return;
@@ -112,6 +129,8 @@ export default function TierDetailPage() {
     }
   };
 
+  // Löscht das aktuell angezeigte Foto (nach Bestätigung über den nativen
+  // confirm()-Dialog) und entfernt es lokal aus dem State.
   const handleDeleteImg = async () => {
     if (!image || !confirm('Foto wirklich löschen?')) return;
     try {

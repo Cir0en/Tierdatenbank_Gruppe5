@@ -1,3 +1,8 @@
+// Route /heatmap: alternative Kartenansicht zu pages/karte.tsx, die alle
+// erfassten Fundorte statt als einzelne Marker als Dichte-Heatmap (MapTiler
+// helpers.addHeatmap) darstellt. Nützlich, um auf einen Blick zu erkennen, wo
+// besonders viele Funde konzentriert sind. Bietet einen Wechsel zurück zur
+// normalen Marker-Karte.
 'use client';
 
 import { useEffect, useRef } from 'react';
@@ -110,6 +115,9 @@ export default function HeatmapPage() {
     };
   }, [isSignedIn, userId, router.isReady]); // Dependencies für Auth hinzugefügt
 
+  // Wechselt zurück zur Marker-Karte (pages/karte.tsx) und übergibt das aktuelle
+  // Kartenzentrum/-zoom als Query-Parameter, damit die Ansicht dort nahtlos
+  // an derselben Stelle fortgesetzt wird.
   const goToKarte = () => {
     const map = mapInstance.current;
     if (!map) { router.push('/karte'); return; }

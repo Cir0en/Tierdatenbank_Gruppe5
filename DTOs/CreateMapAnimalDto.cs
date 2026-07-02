@@ -1,6 +1,6 @@
 namespace TodoApi.DTOs;
 
-
+/// <summary>Request-DTO zum Anlegen eines neuen Objekts/Tieres direkt über die Karten-Ansicht, inkl. Koordinaten und Fundort.</summary>
 public class CreateMapAnimalDto
 {
     public string Name { get; set; } = null!;

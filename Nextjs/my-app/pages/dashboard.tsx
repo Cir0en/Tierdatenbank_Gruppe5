@@ -11,6 +11,17 @@ import '@maptiler/sdk/dist/maptiler-sdk.css';
 
 const API = "http://localhost:5099";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: /dashboard
+// Zweck: Alternative/ältere Variante des Übersichts-Dashboards (siehe auch
+//        pages/index.tsx, das dieselbe Funktion für Gäste + eingeloggte
+//        Nutzer übernimmt). Zeigt Kennzahlen, zuletzt erfasste Objekte,
+//        aktive Leihen (live aus dem Backend statt Mock-Daten), eine
+//        Mini-Kartenvorschau und ein rollenbasiertes Benachrichtigungs-Panel.
+// Rollen: Setzt einen eingeloggten Nutzer voraus (kein Gast-Modus wie bei
+//        index.tsx); Inhalte variieren je nach Rolle (Nutzer/Moderator/Admin).
+// ═══════════════════════════════════════════════════════════════════════════
+
 // ── Types ──────────────────────────────────────────────────────────────────
 type Specimen = {
   id: string; speciesName: string; taxon?: string; fundort?: string;
@@ -37,6 +48,8 @@ type Loan = {
 
 
 // ── Sub-components ─────────────────────────────────────────────────────────
+
+// Kleine Kennzahlen-Kachel (z. B. "Objekte gesamt", "Aktive Leihen").
 function StatCard({ value, label, sub, accent }: { value: string | number; label: string; sub?: string; accent?: boolean }) {
   return (
     <div className={`stat-card${accent ? " stat-card--accent" : ""}`}>
@@ -47,6 +60,7 @@ function StatCard({ value, label, sub, accent }: { value: string | number; label
   );
 }
 
+// Farbiges Status-Badge für Objekt- oder Leihe-Status (grün/gelb/rot/grau je nach Zustand).
 function StatusPill({ status }: { status: Specimen["status"] | string | null }) {
   const map: Record<string, string> = {
     freigegeben: "pill--green",
@@ -61,6 +75,9 @@ function StatusPill({ status }: { status: Specimen["status"] | string | null }) 
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
+
+// Hauptkomponente der /dashboard-Seite. Lädt Objekte, Leihen und
+// rollenspezifische Benachrichtigungsdaten jeweils über eigene useEffect-Hooks.
 export default function DashboardPage() {
   const { signOut } = useClerk();
   const { userId: clerkId, getToken } = useAuth();
@@ -90,6 +107,8 @@ export default function DashboardPage() {
   }, [showNotif]);
 
   // Fetch all animals
+  // Lädt den "zuletzt erfasste Objekte"-Feed und pollt ihn alle 5 Sekunden,
+  // damit neu erfasste Tiere zeitnah im Dashboard auftauchen.
   useEffect(() => {
     const fetchAnimals = async () => {
       const response = await fetch(`${API}/api/animals/dashboard`);
@@ -104,6 +123,9 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch active loans
+  // Lädt die Leihen des Nutzers per 'X-Clerk-User-Id'-Header (kein Bearer-
+  // Token nötig) und filtert bereits zurückgegebene Leihen heraus, damit nur
+  // aktive/überfällige in der "Aktive Leihen"-Kachel erscheinen.
   useEffect(() => {
     if (!clerkId) return;
     fetch(`${API}/api/loan`, { headers: { "X-Clerk-User-Id": clerkId } })
@@ -113,6 +135,11 @@ export default function DashboardPage() {
   }, [clerkId]);
 
   // Fetch role + role-specific notification data
+  // Lädt die eigene Rolle per Bearer-Token (getToken()) — hier also ein
+  // anderes Auth-Muster als bei den Leihen oben — und danach, nur für
+  // Moderator/Admin, die Anzahl ausstehender Taxonomie-Einreichungen.
+  // `cancelled` verhindert, dass nach einem Unmount/erneuten Effect-Lauf noch
+  // State auf einer veralteten Anfrage gesetzt wird (Race-Condition-Schutz).
   useEffect(() => {
     if (!clerkId) return;
     let cancelled = false;
@@ -135,6 +162,8 @@ export default function DashboardPage() {
   }, [clerkId, getToken]);
 
   // Mini-map initialization
+  // Initialisiert die MapTiler-Kartenvorschau einmalig und zeigt anschließend
+  // alle bekannten Fundorte als Marker an; räumt die Karteninstanz beim Unmount auf.
   useEffect(() => {
     if (!miniMapContainer.current || miniMapInstance.current) return;
 
@@ -180,6 +209,10 @@ export default function DashboardPage() {
   const overdue   = loans.filter((l) => l.isOverdue).length;
 
   // Role-based notifications
+  // Baut die Liste der Benachrichtigungen aus den bereits geladenen Daten:
+  // überfällige Leihen und bald fällige Leihen (≤ 3 Tage) für alle Nutzer,
+  // ausstehende Taxonomie-Freigaben für Moderator/Admin, sowie ausstehende
+  // Objekt-Freigaben nur für Admin.
   interface Notif { icon: string; text: string; sub: string; href: string; urgent?: boolean; }
   const notifications: Notif[] = [];
   if (overdue > 0)
@@ -194,6 +227,7 @@ export default function DashboardPage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für das Dashboard; Abschnitte sind unten mit „── ── " markiert. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:wght@300;400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

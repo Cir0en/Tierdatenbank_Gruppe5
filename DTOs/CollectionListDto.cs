@@ -1,5 +1,6 @@
 namespace TodoApi.DTOs;
 
+/// <summary>Response-DTO für die Listenansicht aller Sammlungen (eine Zeile pro Sammlung, inkl. Item-Anzahl und Rechten).</summary>
 public class CollectionListDto
 {
     public int Id { get; set; }

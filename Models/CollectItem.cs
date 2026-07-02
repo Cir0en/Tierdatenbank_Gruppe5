@@ -4,6 +4,13 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TodoApi.Models;
 
+/// <summary>
+/// Repräsentiert ein einzelnes gesammeltes Objekt/Tier (Tabelle "collect_items") – das zentrale
+/// fachliche Kernstück der Anwendung. Ein CollectItem gehört optional zu einer <see cref="Collection"/>,
+/// ist optional einer <see cref="Taxonomy"/> (Art/Gattung/...) und einem <see cref="GeoLocation"/>
+/// (Fundort) zugeordnet und kann mehrere <see cref="ObjectImage"/>s sowie <see cref="Loan"/>-Vorgänge
+/// (Ausleihen) besitzen.
+/// </summary>
 public partial class CollectItem
 {
     public int Id { get; set; }
@@ -20,16 +27,22 @@ public partial class CollectItem
 
     public string? Description { get; set; }
 
+    /// <summary>Freitext zur physischen Lagerung/Aufbewahrung des Objekts (z.B. Vitrine, Schrank-Nr.).</summary>
     public string? StorageInfo { get; set; }
 
     public DateTime? CreatedAt { get; set; }
 
+    /// <summary>Fachlicher Status des Objekts (z.B. "verfügbar"/"verliehen"); freier String, keine DB-Enum.</summary>
     public string? Status { get; set; }
 
+    /// <summary>Geschlecht des Tieres, falls bekannt (freier String, z.B. "männlich"/"weiblich").</summary>
     public string? Sex { get; set; }
 
+    /// <summary>Altersklasse des Tieres, falls bekannt (freier String, z.B. "adult"/"juvenil").</summary>
     public string? AgeClass { get; set; }
 
+    // Kategorie + Lebensraum: [NotMapped], da die zugehörigen DB-Spalten noch nicht per ALTER TABLE
+    // angelegt wurden. Werte werden aktuell nicht persistiert, nur zur Laufzeit gehalten.
     [NotMapped] public string? Kategorie { get; set; }
 
     [NotMapped] public string? Lebensraum { get; set; }

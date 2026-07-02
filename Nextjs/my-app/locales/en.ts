@@ -1,3 +1,7 @@
+// Englische Übersetzungstabelle für den i18n-Kontext (siehe contexts/LanguageContext.tsx).
+// Muss strukturell exakt dem Typ `Translations` aus locales/de.ts entsprechen
+// (daher die explizite Typannotation unten), damit für jeden Schlüssel eine
+// englische Entsprechung existiert.
 import type { Translations } from './de';
 
 const en: Translations = {

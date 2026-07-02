@@ -7,8 +7,22 @@ import Navbar from '../components/Navbar';
 
 const API = 'http://localhost:5099';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: /moderator
+// Zweck: Interner Arbeitsbereich für Moderatoren/Admins. Zwei Tabs:
+//        1) "Taxonomie-Prüfung": Liste ausstehender Taxonomie-Einreichungen
+//           mit Freigabe-/Ablehnen-Workflow (inkl. Moderatorennotiz).
+//        2) "Berichte": Kennzahlen-Dashboard (Taxonomie-, Sammlungs- und
+//           Leihe-Statistiken sowie eine Nutzer-Aktivitätstabelle).
+// Rollen: Nur für Rolle "Moderator" oder "Admin" zugänglich — die Rolle wird
+//        aus den Clerk publicMetadata gelesen; andere Nutzer (inkl. Gäste)
+//        werden per Redirect umgeleitet (siehe useEffect weiter unten).
+// ═══════════════════════════════════════════════════════════════════════════
+
 type TabId = 'submissions' | 'reports';
 
+// Aggregierte Kennzahlen für den "Berichte"-Tab, wie vom Backend
+// (/api/stats/moderator) geliefert.
 interface ModStats {
   taxonomy: { taxPending: number; taxApproved: number; taxRejected: number; taxThisMonth: number };
   collection: { colTotal: number; colFreigegeben: number; colAusstehend: number; colAbgelehnt: number };
@@ -17,6 +31,7 @@ interface ModStats {
   recentDecisions: { id: number; art: string; gattung: string; status: string; moderatorNote: string | null; reviewedAt: string }[];
 }
 
+// Zeile der Nutzer-Aktivitätstabelle im Berichte-Tab (/api/stats/moderator/users).
 interface UserActivity {
   id: number;
   username: string;
@@ -33,6 +48,7 @@ interface UserActivity {
   lastSubmission: string | null;
 }
 
+// Eine ausstehende Taxonomie-Einreichung (manuell oder via GBIF-Vorschlag).
 interface Submission {
   id: number;
   reich: string;
@@ -47,11 +63,14 @@ interface Submission {
   createdAt: string;
 }
 
+// Zustand des Freigabe-/Ablehnen-Dialogs: welche Einreichung und welche Aktion.
 interface ReviewModal {
   submission: Submission;
   action: 'approve' | 'reject';
 }
 
+// Einzeilige Darstellung einer ausstehenden Taxonomie-Einreichung mit
+// "Prüfen"/"Ablehnen"-Buttons, die den ReviewDialog öffnen.
 function SubmissionRow({ sub, onApprove, onReject }: {
   sub: Submission;
   onApprove: (sub: Submission) => void;
@@ -80,6 +99,8 @@ function SubmissionRow({ sub, onApprove, onReject }: {
   );
 }
 
+// Modal zum Freigeben/Ablehnen einer Taxonomie-Einreichung inkl. optionaler
+// bzw. empfohlener Moderatorennotiz (bei Ablehnung sollte ein Grund angegeben werden).
 function ReviewDialog({ modal, onClose, onDone }: {
   modal: ReviewModal;
   onClose: () => void;
@@ -90,6 +111,8 @@ function ReviewDialog({ modal, onClose, onDone }: {
   const [error, setError]   = useState<string | null>(null);
   const { submission, action } = modal;
 
+  // Sendet die Entscheidung (approve/reject) mit Notiz ans Backend. Der
+  // Endpunkt wird abhängig von der gewählten Aktion dynamisch ausgewählt.
   const handle = async () => {
     setSaving(true);
     setError(null);
@@ -163,6 +186,9 @@ function ReviewDialog({ modal, onClose, onDone }: {
   );
 }
 
+// Hauptkomponente der Moderator-Seite: regelt den Rollen-Zugriffsschutz,
+// lädt Einreichungen sowie Berichtsdaten je nach aktivem Tab, und verwaltet
+// den Freigabe-/Ablehnen-Dialog.
 export default function ModeratorPage() {
   const { user } = useUser();
   const { isSignedIn, getToken } = useAuth();
@@ -177,8 +203,12 @@ export default function ModeratorPage() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [userActivity, setUserActivity] = useState<UserActivity[]>([]);
 
+  // Rolle wird aus den Clerk publicMetadata gelesen (nicht per Backend-Call);
+  // steht clientseitig sofort zur Verfügung und dient hier nur der Zugriffskontrolle.
   const currentRole = (user?.publicMetadata?.role as string) ?? '';
 
+  // Zugriffsschutz: nicht eingeloggte Nutzer werden zum Login geschickt,
+  // eingeloggte Nutzer ohne Moderator-/Admin-Rolle zur Startseite.
   useEffect(() => {
     if (isSignedIn === false) { router.replace('/login'); return; }
     if (isSignedIn && currentRole && currentRole !== 'Moderator' && currentRole !== 'Admin') {
@@ -186,6 +216,8 @@ export default function ModeratorPage() {
     }
   }, [isSignedIn, currentRole, router]);
 
+  // Lädt die Liste ausstehender Taxonomie-Einreichungen (öffentlicher
+  // Endpunkt, kein Auth-Header nötig — die Seite selbst ist aber geschützt).
   const fetchSubmissions = useCallback(async () => {
     try {
       const res = await fetch(`${API}/api/taxonomy/submissions/pending`);
@@ -200,6 +232,9 @@ export default function ModeratorPage() {
 
   useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
 
+  // Lädt die Berichtsdaten (Statistiken + Nutzer-Aktivität) für den
+  // "Berichte"-Tab. Nutzt hier Bearer-Token-Auth (getToken()), da die
+  // Stats-Endpunkte serverseitig die Moderator-/Admin-Rolle verifizieren müssen.
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
@@ -219,15 +254,21 @@ export default function ModeratorPage() {
     }
   }, [getToken]);
 
+  // Lädt die Berichtsdaten erst, wenn der Nutzer tatsächlich auf den
+  // "Berichte"-Tab wechselt (lazy loading), und nur einmal (solange `stats` gesetzt ist).
   useEffect(() => {
     if (tab === 'reports' && !stats) fetchStats();
   }, [tab, stats, fetchStats]);
 
+  // Entfernt die bearbeitete Einreichung optimistisch aus der lokalen Liste
+  // und schließt den Dialog, sobald Freigabe/Ablehnung erfolgreich war.
   const handleDone = (id: number) => {
     setSubmissions(prev => prev.filter(s => s.id !== id));
     setModal(null);
   };
 
+  // Rendert nichts, solange der Redirect (siehe useEffect oben) noch nicht
+  // gegriffen hat bzw. für Nutzer ohne passende Rolle.
   if (!isSignedIn || (currentRole !== 'Moderator' && currentRole !== 'Admin')) return null;
 
   const tabs: { id: TabId; label: string; count?: number }[] = [
@@ -237,6 +278,7 @@ export default function ModeratorPage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite. */}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; background: #f8f9fa; font-family: 'Inter', system-ui, sans-serif; font-size: 13px; overflow: hidden; }

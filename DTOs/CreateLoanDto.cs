@@ -1,5 +1,6 @@
 namespace TodoApi.DTOs;
 
+/// <summary>Request-DTO zum Anlegen einer neuen Ausleihe für ein Objekt.</summary>
 public class CreateLoanDto
 {
     public int ObjectId { get; set; }

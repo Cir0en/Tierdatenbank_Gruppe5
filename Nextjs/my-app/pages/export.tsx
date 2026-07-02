@@ -1,3 +1,7 @@
+// Route /export: "Einstellungen"-Seite (Profil-Übersicht, CSV-Export der eigenen
+// Sammlung, Sprachwahl und Konto-Löschung/Gefahrenzone). Trotz des Dateinamens
+// "export" enthält diese Seite die komplette Nutzer-Einstellungen-UI; der
+// CSV-Export ist nur einer von mehreren Bereichen.
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -31,6 +35,9 @@ export default function EinstellungenPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // Lädt die gesamte Sammlung als CSV-Datei herunter: ruft den Export-Endpunkt
+  // auf, wandelt die Antwort in einen Blob um und stößt darüber einen
+  // client-seitigen Datei-Download mit datiertem Dateinamen an.
   const handleCsvDownload = async () => {
     setExporting(true);
     try {
@@ -54,10 +61,13 @@ export default function EinstellungenPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  // Schützt die Seite client-seitig: nicht angemeldete Nutzer werden zum Login geschickt
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace('/login');
   }, [isLoaded, isSignedIn, router]);
 
+  // Lädt das eigene Nutzerprofil (Rolle, Institution, Registrierungsdatum, ...)
+  // aus der Datenbank, sobald der Nutzer angemeldet ist.
   useEffect(() => {
     if (!isSignedIn) return;
     (async () => {
@@ -71,6 +81,9 @@ export default function EinstellungenPage() {
     })();
   }, [isSignedIn, getToken]);
 
+  // Löscht das eigene Konto endgültig (nur möglich nach Eingabe des Bestätigungs-
+  // Schlüsselworts "LÖSCHEN"). Meldet den Nutzer bei Erfolg über Clerk ab und
+  // leitet zur Login-Seite weiter.
   const handleDeleteAccount = async () => {
     if (deleteConfirm !== 'LÖSCHEN') return;
     setDeleting(true);
@@ -93,6 +106,8 @@ export default function EinstellungenPage() {
     }
   };
 
+  // Anzeigename mit Fallback-Kette (Clerk-Vollname -> Vorname -> DB-Username) und
+  // daraus abgeleitete Initialen für den Avatar
   const displayName = user?.fullName ?? user?.firstName ?? profile?.username ?? '—';
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 

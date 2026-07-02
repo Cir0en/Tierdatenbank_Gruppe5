@@ -5,6 +5,20 @@ import { useRouter } from 'next/router';
 import { useUser, useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Seite: /Sammlung
+// Zweck: Übersicht und Verwaltung von "Sammlungen" (Gruppierungen von Tier-
+//        Einträgen). Zeigt öffentliche Sammlungen aller Nutzer sowie die eigenen
+//        (öffentlichen und privaten) Sammlungen des eingeloggten Nutzers an.
+//        Erlaubt das Anlegen neuer Sammlungen, das Hinzufügen von Tieren zu einer
+//        Sammlung (inkl. GBIF-Taxonomie-Abgleich) sowie das Ausleihen einzelner
+//        Tiere an andere Nutzer.
+// Rollen: Für nicht eingeloggte Nutzer read-only sichtbar (nur öffentliche
+//        Sammlungen). Eingeloggte Nutzer (jede Rolle) können eigene Sammlungen
+//        anlegen/löschen und Tiere hinzufügen bzw. verleihen, sofern sie Owner
+//        der jeweiligen Sammlung sind (siehe `isOwner`/`canEdit`/`canDelete`).
+// ═══════════════════════════════════════════════════════════════════════════════
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Collection {
@@ -46,6 +60,8 @@ interface CollectionDetail extends Collection {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+// Ordnet dem Seltenheits-/Schutzstatus eines Tiers Hintergrund- und Textfarbe für
+// das Badge in der Kartenansicht zu. Unbekannte/leere Werte bekommen ein neutrales Grau.
 function statusBadge(status: string | null) {
   switch ((status ?? '').toLowerCase()) {
     case 'häufig':
@@ -61,6 +77,7 @@ function statusBadge(status: string | null) {
 
 // ── Create Modal ───────────────────────────────────────────────────────────────
 
+// Modal zum Anlegen einer neuen Sammlung (Name, Beschreibung, Sichtbarkeit).
 function CreateModal({ onClose, onSaved, clerkUserId }: {
   onClose: () => void;
   onSaved: () => void;
@@ -72,6 +89,9 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
+  // Validiert die Eingaben, sendet die neue Sammlung ans Backend und meldet
+  // Erfolg über onSaved(). Auth erfolgt hier per 'X-Clerk-User-Id'-Header
+  // (nicht per Bearer-Token) — das Backend identifiziert den Owner darüber.
   const handleSave = async () => {
     if (!name.trim()) { setError('Bitte einen Namen eingeben.'); return; }
     if (!clerkUserId) { setError('Du musst eingeloggt sein.'); return; }
@@ -139,6 +159,8 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
 
 // ── Collection Card ────────────────────────────────────────────────────────────
 
+// Kachel einer einzelnen Sammlung in der Grid-Übersicht. Öffnet beim Klick die
+// Detailansicht; zeigt einen Löschen-Button nur, wenn der Nutzer canDelete hat.
 function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
   col: Collection;
   clerkUserId: string | null;
@@ -147,6 +169,8 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
 }) {
   const [deleting, setDeleting] = useState(false);
 
+  // Löscht die Sammlung nach Bestätigungsdialog. stopPropagation verhindert,
+  // dass der Klick zusätzlich den Karten-onClick (Öffnen) auslöst.
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm(`Sammlung „${col.name}" wirklich löschen?`)) return;
@@ -192,6 +216,8 @@ const API = 'http://localhost:5099';
 
 type LoanUser = { id: number; username: string; firstName: string | null; lastName: string | null; institution: string | null };
 
+// Modal zum Ausleihen eines einzelnen Sammlungs-Eintrags (Tiers) an einen
+// anderen registrierten Nutzer. Nur für den Owner der Sammlung sichtbar.
 function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
   item: CollectionItem;
   clerkUserId: string;
@@ -206,6 +232,8 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState<string | null>(null);
 
+  // Lädt beim Öffnen des Modals die Liste möglicher Entleiher (alle anderen
+  // Nutzer). Fehler werden bewusst verschluckt — dann bleibt die Auswahl leer.
   useEffect(() => {
     fetch(`${API}/api/loan/users`, { headers: { 'X-Clerk-User-Id': clerkUserId } })
       .then(r => r.ok ? r.json() : [])
@@ -213,9 +241,12 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
       .catch(() => {});
   }, [clerkUserId]);
 
+  // Baut einen lesbaren Anzeigenamen (Vor-/Nachname, sonst Username) für die Auswahlliste.
   const displayName = (u: LoanUser) =>
     [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username;
 
+  // Legt die Ausleihe im Backend an. Validiert vorher, dass Entleiher und
+  // beide Datumsfelder gesetzt sind, und zeigt Backend-Fehlermeldungen an.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!borrowerId || !startDate || !endDate) { setError('Bitte alle Felder ausfüllen.'); return; }
@@ -295,6 +326,9 @@ function LoanAnimalModal({ item, clerkUserId, onClose, onSaved }: {
 }
 
 // ── GBIF Types ─────────────────────────────────────────────────────────────────
+// Typen für die Antwort der GBIF-Taxonomie-Suche (Global Biodiversity
+// Information Facility): entweder ein eindeutiger Treffer (match_found) oder
+// eine Liste von Vorschlägen, die der Nutzer manuell bestätigen muss.
 
 interface GbifTaxonomy {
   reich: string; stamm: string; klasse: string;
@@ -321,6 +355,10 @@ type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
 
 // ── Add Animal Modal ──────────────────────────────────────────────────────────
 
+// Modal zum Hinzufügen eines neuen Tier-Eintrags zu einer Sammlung. Enthält
+// zusätzlich den GBIF-Workflow: der Nutzer gibt einen Artnamen ein, sucht
+// gegen die GBIF-Datenbank und übernimmt (bestätigt) einen Treffer, wodurch
+// eine taxonomyId für das Tier gesetzt wird.
 function AddAnimalModal({ collectionId, onClose, onSaved }: {
   collectionId: number;
   onClose: () => void;
@@ -346,6 +384,8 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [confirming, setConfirming]       = useState(false);
 
+  // Setzt den kompletten GBIF-Zustand zurück (z. B. wenn der Artname geändert
+  // wird und ein vorheriger Treffer/Vorschlag damit ungültig wird).
   const resetGbif = () => {
     setGbifResult(null);
     setConfirmedName(null);
@@ -353,6 +393,8 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setGbifError(null);
   };
 
+  // Fragt die GBIF-Taxonomie-API mit dem eingegebenen Artnamen ab. Ergebnis ist
+  // entweder ein eindeutiger Treffer oder eine Liste von Vorschlägen (siehe GbifResult).
   const handleGbifSearch = async () => {
     if (!name.trim()) return;
     setGbifLoading(true);
@@ -368,6 +410,9 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     }
   };
 
+  // Bestätigt einen GBIF-Treffer/-Vorschlag (per usageKey): das Backend legt
+  // dafür ggf. einen Taxonomie-Datensatz an/findet ihn und liefert dessen id
+  // zurück, die anschließend beim Speichern des Tiers mitgeschickt wird.
   const handleGbifConfirm = async (usageKey: number, displayName: string) => {
     setConfirming(true);
     setGbifError(null);
@@ -389,6 +434,9 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     }
   };
 
+  // Speichert das neue Tier mit allen Formularfeldern (inkl. optionaler
+  // taxonomyId aus dem GBIF-Workflow) im Backend. Leere/„Unbekannt"-Werte
+  // werden bewusst als null statt als leerer String übergeben.
   const handleSave = async () => {
     if (!name.trim()) { setError('Bitte einen Artnamen eingeben.'); return; }
     setSaving(true);
@@ -588,6 +636,10 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
 
 // ── Collection Detail View ─────────────────────────────────────────────────────
 
+// Detailansicht einer einzelnen Sammlung: zeigt alle enthaltenen Tier-Einträge
+// als Karten-Grid, erlaubt dem Owner das Hinzufügen neuer Tiere und das
+// Ausleihen einzelner Einträge. Ein Klick auf eine Tierkarte navigiert zur
+// Detailseite des Tiers (/tier/[id]).
 function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerkUserId }: {
   detail: CollectionDetail;
   onBack: () => void;
@@ -732,9 +784,17 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
 
 type Tab = 'public' | 'mine';
 
+// Hauptkomponente der Seite /Sammlung. Verwaltet sowohl die Grid-Übersicht
+// (mit Tabs "Öffentlich" / "Meine Sammlungen" und Volltextsuche über den Namen)
+// als auch die Detailansicht (siehe CollectionDetailView), zwischen denen über
+// den lokalen `detail`-State umgeschaltet wird (kein eigenes Routing/URL-Wechsel).
 export default function SammlungPage() {
   const { user } = useUser();
   const { isSignedIn } = useAuth();
+  // clerkUserId wird bei jeder API-Anfrage als 'X-Clerk-User-Id'-Header
+  // mitgeschickt, damit das Backend Owner-Rechte (canEdit/canDelete/isOwner)
+  // korrekt berechnen kann; ist der Nutzer nicht eingeloggt, bleibt er null
+  // und es werden nur öffentlich sichtbare Daten geliefert.
   const clerkUserId = user?.id ?? null;
 
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -748,6 +808,9 @@ export default function SammlungPage() {
   const [detail, setDetail]           = useState<CollectionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Lädt die Liste aller für den Nutzer sichtbaren Sammlungen (öffentliche +
+  // eigene private). Als useCallback gewrapped, damit die Referenz nur bei
+  // Änderung von clerkUserId neu erzeugt wird (Abhängigkeit von useEffect unten).
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -764,8 +827,12 @@ export default function SammlungPage() {
     }
   }, [clerkUserId]);
 
+  // Initiales Laden der Sammlungsliste beim Mount bzw. wenn sich der Nutzer
+  // (an/ab-)meldet und sich dadurch `load` ändert.
   useEffect(() => { load(); }, [load]);
 
+  // Lädt die Detaildaten (inkl. aller enthaltenen Tier-Einträge) einer
+  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um.
   const openCollection = async (id: number) => {
     setDetailLoading(true);
     setDetail(null);
@@ -782,8 +849,13 @@ export default function SammlungPage() {
     }
   };
 
+  // Callback nach erfolgreichem Anlegen einer Sammlung: Modal schließen und
+  // Liste neu laden, damit die neue Sammlung sofort sichtbar ist.
   const handleSaved = () => { setShowModal(false); load(); };
 
+  // Client-seitige Filterung nach Tab (öffentlich vs. eigene) und Suchbegriff.
+  // Die eigenen Sammlungen werden zusätzlich in privat/öffentlich unterteilt,
+  // um sie in der "Meine Sammlungen"-Ansicht in zwei Abschnitten anzuzeigen.
   const publicCols = collections.filter(c =>
     c.isPublic && (search === '' || c.name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -795,6 +867,7 @@ export default function SammlungPage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite; Abschnitte sind unten mit „── ── " markiert. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

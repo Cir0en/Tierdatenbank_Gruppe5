@@ -1,3 +1,11 @@
+// App-weite Navigation (linke Sidebar), die auf praktisch jeder Seite über
+// <Navbar activeNav="..."/> eingebunden wird. Verantwortlich für:
+//  - Anzeige der Navigationspunkte, inkl. rollenbasierter Einschränkung
+//    (z.B. "Moderation"/"Admin" nur für die jeweiligen Rollen sichtbar)
+//  - Ein-/Ausklappen der Sidebar
+//  - Anzeige von Nutzername/Rolle bzw. Login-Link, falls nicht angemeldet
+//  - Laden und periodisches Aktualisieren einer Benachrichtigungszahl
+//    (überfällige Ausleihen + zu prüfende/abgelehnte Taxonomie-Einreichungen)
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,6 +16,9 @@ import { useLanguage } from "../contexts/LanguageContext";
 
 const API = "http://localhost:5099";
 
+// Statische Definition aller möglichen Navigationspunkte. `roles: null` bedeutet
+// für jeden sichtbar; ist ein Array gesetzt, wird der Punkt weiter unten anhand
+// der aktuellen Nutzerrolle (userRole) herausgefiltert.
 const NAV_ITEMS = [
   { id: "index",     label: "Dashboard",      icon: "⊞", href: "/",           roles: null },
   { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung",   roles: null },
@@ -32,7 +43,17 @@ export default function Navbar({ activeNav: activeProp }: Props) {
   const [dbRole, setDbRole] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
 
-  // Rolle + Benachrichtigungszahl holen und alle 30 s aktualisieren
+  // Rolle + Benachrichtigungszahl holen und alle 30 s aktualisieren.
+  // Die Benachrichtigungszahl (notifCount, angezeigt als Badge am Dashboard-Link)
+  // setzt sich aus drei Quellen zusammen:
+  //   1. eigene überfällige Ausleihen
+  //   2. offene Taxonomie-Einreichungen, die auf Prüfung warten (nur für
+  //      Moderator/Admin sichtbar, da nur diese Rollen sie bearbeiten dürfen)
+  //   3. eigene abgelehnte Taxonomie-Einreichungen, die der Nutzer noch nicht
+  //      "gesehen"/verworfen hat (Abgleich gegen eine in localStorage gepflegte
+  //      Liste bereits quittierter Ablehnungs-IDs)
+  // Ein Intervall sorgt dafür, dass die Zahl auch ohne Neuladen der Seite
+  // regelmäßig aktuell bleibt.
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !user?.id) return;
     let cancelled = false;
@@ -43,6 +64,8 @@ export default function Navbar({ activeNav: activeProp }: Props) {
         const token = await getToken();
         if (!token || cancelled) return;
 
+        // Eigene Rolle aus der Datenbank laden (maßgeblich für Sichtbarkeit von
+        // Nav-Punkten und für die Taxonomie-Zähllogik unten)
         const meRes = await fetch(`${API}/api/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -96,6 +119,9 @@ export default function Navbar({ activeNav: activeProp }: Props) {
     return () => { cancelled = true; clearInterval(interval); };
   }, [isLoaded, isSignedIn, getToken, user?.id]);
 
+  // Aktiver Nav-Punkt: entweder explizit von der Seite über die `activeNav`-Prop
+  // vorgegeben, oder anhand des aktuellen Next.js-Routen-Pfads ermittelt
+  // (Fallback: "index"/Dashboard, z.B. bei dynamischen Routen wie /tier/[id]).
   const active =
     activeProp ??
     (NAV_ITEMS.find((i) => i.href === router.pathname)?.id ?? "index");
@@ -299,7 +325,7 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           {open && <span className="nb-logo-text">Collectio</span>}
         </div>
 
-        {/* Nav items */}
+        {/* Nav items: rollenbasiert gefiltert (siehe NAV_ITEMS.roles weiter oben) */}
         <nav className="nb-nav">
           {NAV_ITEMS.filter(item =>
             !item.roles || item.roles.includes(userRole)

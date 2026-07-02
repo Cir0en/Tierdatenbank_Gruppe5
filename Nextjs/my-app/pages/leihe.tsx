@@ -6,6 +6,18 @@ import Navbar from "../components/Navbar";
 
 const API = "http://localhost:5099";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: /leihe
+// Zweck: Verwaltung aller Leihvorgänge des eingeloggten Nutzers — sowohl als
+//        Verleiher (eigene Objekte, die man verliehen hat) als auch als
+//        Entleiher (Objekte, die man sich von anderen ausgeliehen hat).
+//        Erlaubt Anlegen neuer Ausleihen, Markieren als zurückgegeben/aktiv
+//        sowie Löschen (nur als Verleiher möglich).
+// Rollen: Setzt einen eingeloggten Nutzer voraus; Aktionen (Status ändern,
+//        löschen) sind nur für den Verleiher (isLender) der jeweiligen Leihe
+//        sichtbar, unabhängig von der globalen Nutzerrolle.
+// ═══════════════════════════════════════════════════════════════════════════
+
 // ── Types ──────────────────────────────────────────────────────────────────
 type Loan = {
   id: number;
@@ -32,16 +44,22 @@ type FilterRole = "alle" | "verleiher" | "entleiher";
 type FilterStatus = "alle" | "aktiv" | "ueberfaellig" | "zurueck";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+// Formatiert ein ISO-Datum als deutsches Datum; gibt "—" bei fehlendem Wert
+// zurück und den Rohwert, falls das Parsen fehlschlägt.
 function fmt(d: string | null): string {
   if (!d) return "—";
   try { return new Date(d).toLocaleDateString("de-DE"); } catch { return d; }
 }
 
+// Baut einen lesbaren Anzeigenamen (Vor-/Nachname, sonst Username, sonst "—").
 function displayName(first: string | null, last: string | null, username: string | null): string {
   if (first || last) return [first, last].filter(Boolean).join(" ");
   return username ?? "—";
 }
 
+// Übersetzt den rohen Backend-Status in den in der UI angezeigten Status.
+// Überfällige Leihen haben Vorrang vor dem gespeicherten Status.
 function effectiveStatus(loan: Loan): string {
   if (loan.isOverdue) return "überfällig";
   // DB speichert laufende Leihen als 'offen', UI zeigt 'aktiv'
@@ -49,6 +67,8 @@ function effectiveStatus(loan: Loan): string {
   return loan.status ?? "—";
 }
 
+// Farbiges Status-Badge für eine einzelne Leihe (grün=aktiv, rot=überfällig,
+// grau=zurückgegeben, gelb=offen als Fallback).
 function StatusPill({ loan }: { loan: Loan }) {
   const s = effectiveStatus(loan);
   const cls: Record<string, string> = {
@@ -61,6 +81,10 @@ function StatusPill({ loan }: { loan: Loan }) {
 }
 
 // ── Modal: Neue Ausleihe ───────────────────────────────────────────────────
+
+// Modal zum Anlegen einer neuen Ausleihe: Nutzer wählt eines seiner eigenen
+// Objekte (`objects`, aus /api/loan/my-objects) sowie einen Entleiher
+// (`users`, aus /api/loan/users) und einen Zeitraum aus.
 function CreateLoanModal({
   objects, users, clerkId,
   onCreated, onClose,
@@ -78,6 +102,10 @@ function CreateLoanModal({
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
 
+  // Validiert die Pflichtfelder und legt die Ausleihe im Backend an. Auth
+  // erfolgt per 'X-Clerk-User-Id'-Header, damit das Backend den Verleiher
+  // (aktueller Nutzer) eindeutig zuordnen kann. Fehler werden dem Nutzer
+  // im Formular angezeigt statt einer Exception.
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!objectId || !borrowerId || !startDate || !endDate) {
@@ -183,6 +211,10 @@ function CreateLoanModal({
 }
 
 // ── Main Page ──────────────────────────────────────────────────────────────
+
+// Hauptkomponente der Leihverwaltungs-Seite: lädt Leihen sowie Hilfsdaten
+// (eigene Objekte, mögliche Entleiher), bietet Filter nach Rolle/Status und
+// Aktionen zum Statuswechsel bzw. Löschen einzelner Leihen an.
 export default function LeihePage() {
   const { userId: clerkId } = useAuth();
 
@@ -196,8 +228,12 @@ export default function LeihePage() {
   const [filterRole, setFilterRole]     = useState<FilterRole>("alle");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("alle");
 
+  // Auth-Header für alle Leihe-Anfragen: Diese Seite nutzt durchgängig das
+  // 'X-Clerk-User-Id'-Header-Muster (statt Bearer-Token), damit das Backend
+  // Verleiher/Entleiher-Zuordnung ohne zusätzlichen Token-Roundtrip auflösen kann.
   const headers = clerkId ? { "X-Clerk-User-Id": clerkId } : undefined;
 
+  // Lädt alle Leihen, an denen der Nutzer als Verleiher oder Entleiher beteiligt ist.
   const fetchLoans = async () => {
     if (!clerkId) return;
     try {
@@ -211,6 +247,8 @@ export default function LeihePage() {
     }
   };
 
+  // Lädt die Hilfsdaten für das "Neue Ausleihe"-Modal: eigene ausleihbare
+  // Objekte und die Liste möglicher Entleiher (parallel per Promise.all).
   const fetchSupportData = async () => {
     if (!clerkId) return;
     try {
@@ -225,11 +263,16 @@ export default function LeihePage() {
     }
   };
 
+  // Initiales Laden bzw. Neuladen, sobald sich der eingeloggte Nutzer ändert.
   useEffect(() => {
     fetchLoans();
     fetchSupportData();
   }, [clerkId]);
 
+  // Ändert den Status einer Leihe (z. B. "zurückgegeben" oder Reaktivierung
+  // auf "offen"). Nur der Verleiher darf das (serverseitig geprüft); Fehler
+  // werden im actionError-Banner angezeigt. Die Liste wird danach immer neu
+  // geladen, um konsistente isOverdue-Werte vom Server zu bekommen.
   const handleStatusChange = async (loanId: number, status: string) => {
     if (!clerkId) return;
     setActionError(null);
@@ -250,6 +293,7 @@ export default function LeihePage() {
     }
   };
 
+  // Löscht eine Leihe nach Bestätigungsdialog (nur für den Verleiher sichtbar/möglich).
   const handleDelete = async (loanId: number) => {
     if (!clerkId) return;
     if (!confirm("Leihe wirklich löschen?")) return;
@@ -271,6 +315,9 @@ export default function LeihePage() {
   };
 
   // Filter
+  // Wendet die Rollen- (Verleiher/Entleiher) und Status-Filter der Toolbar
+  // client-seitig auf die geladene Leihenliste an; nutzt effectiveStatus()
+  // für den Statusabgleich, damit "aktiv"/"überfällig" korrekt greifen.
   const filtered = loans.filter((l) => {
     const roleOk =
       filterRole === "alle" ||
@@ -287,12 +334,14 @@ export default function LeihePage() {
     return roleOk && statusOk;
   });
 
+  // Kennzahlen für die Stat-Kacheln oben auf der Seite (ungefiltert, über alle Leihen).
   const activeCount   = loans.filter((l) => l.status === "offen" && !l.isOverdue).length;
   const overdueCount  = loans.filter((l) => l.isOverdue).length;
   const returnedCount = loans.filter((l) => l.status === "zurückgegeben").length;
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite. */}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {

@@ -2,6 +2,7 @@
 
 namespace TodoApi.DTOs;
 
+/// <summary>Request-DTO, mit dem ein Nutzer einen manuellen Taxonomie-Vorschlag (TaxonomySubmission) zur Prüfung einreicht.</summary>
 public class CreateTaxonomySubmissionDto
 {
     public string Stamm { get; set; } = null!;

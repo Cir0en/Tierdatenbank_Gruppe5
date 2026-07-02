@@ -4,8 +4,23 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Seite: /taxonomie
+// Zweck: Durchsuchbarer, hierarchischer Baum der biologischen Taxonomie
+//        (Reich → Stamm → Klasse → Ordnung → Familie → Gattung → Art) als
+//        Kachel-Navigation. Klick auf einen Endknoten (Blatt ohne Kinder)
+//        zeigt die zugeordneten Tier-Einträge. Erlaubt das Hinzufügen neuer
+//        Taxonomie-Einträge per GBIF-Suche oder manueller Eingabe.
+// Rollen: Lesend für alle Besucher sichtbar. Neue Einträge können nur
+//        eingeloggte Nutzer anlegen (via GBIF sofort aktiv, manuelle
+//        Einträge landen als Einreichung zur Moderation). Löschen von
+//        Taxonomie-Knoten ist nur Moderator/Admin vorbehalten (canModerate).
+// ═══════════════════════════════════════════════════════════════════════════════
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+// Ein Knoten im Taxonomie-Baum (z. B. eine Familie oder Art); parentId bildet
+// die Baumstruktur ab (null = Wurzel/Reich).
 interface TaxonomyEntry {
   id: number;
   parentId: number | null;
@@ -14,6 +29,8 @@ interface TaxonomyEntry {
   isApproved: boolean | null;
 }
 
+// Kurzform eines Tier-Eintrags, wie sie für die Zuordnung zu Taxonomie-Knoten
+// benötigt wird (aus /api/animals/dashboard).
 interface AnimalSummary {
   id: number | string;
   name: string | null;
@@ -24,6 +41,7 @@ interface AnimalSummary {
 }
 
 // ── GBIF Types ─────────────────────────────────────────────────────────────────
+// Typen für die Kommunikation mit der GBIF-Taxonomie-Suche im Create-Modal.
 
 interface GbifTaxonomy {
   reich?: string;
@@ -57,6 +75,9 @@ interface GbifPreviewResult {
   suggestions?: GbifSuggestion[];
 }
 
+// Schritte des Assistenten im "Neuer Eintrag"-Modal: erst Suche, dann je nach
+// GBIF-Ergebnis Bestätigung eines Treffers oder Auswahl aus Vorschlägen,
+// alternativ komplett manuelle Eingabe; "submitted" ist der Abschluss-Screen.
 type ModalStep = 'search' | 'gbif_confirm' | 'gbif_suggestions' | 'manual' | 'submitted';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -79,14 +100,20 @@ const RANK_EMOJIS: Record<string, string> = {
   Ordnung: '📋', Familie: '🌿', Gattung: '🌱', Art: '🐾',
 };
 
+// Liefert Hintergrund-/Textfarbe für die Kachel eines Taxonomie-Rangs
+// (Reich, Stamm, Klasse, …); unbekannte Ränge bekommen einen neutralen Stil.
 function getRankStyle(rank: string | null) {
   return RANK_STYLES[rank ?? ''] ?? DEFAULT_STYLE;
 }
 
+// Liefert das Emoji-Icon passend zum Taxonomie-Rang.
 function getEmoji(rank: string | null) {
   return RANK_EMOJIS[rank ?? ''] ?? '📌';
 }
 
+// Sammelt per Breitensuche alle Nachfahren-IDs (inkl. der Wurzel selbst) eines
+// Taxonomie-Knotens. Wird benutzt, um allen Tieren einer Gruppe (z. B. einer
+// Familie) auch die Tiere ihrer Unter-Ränge (Gattungen, Arten) zuzurechnen.
 function getSubtreeIds(rootId: number, all: TaxonomyEntry[]): Set<number> {
   const result = new Set([rootId]);
   const queue = [rootId];
@@ -100,6 +127,7 @@ function getSubtreeIds(rootId: number, all: TaxonomyEntry[]): Set<number> {
   return result;
 }
 
+// Ordnet dem Freigabe-/Sichtbarkeitsstatus eines Tiers Farbe und Anzeigetext zu.
 function statusBadge(status: string): { bg: string; color: string; label: string } {
   switch ((status ?? '').toLowerCase()) {
     case 'freigegeben':
@@ -116,6 +144,8 @@ function statusBadge(status: string): { bg: string; color: string; label: string
 
 // ── Create-Modal ───────────────────────────────────────────────────────────────
 
+// Zeigt eine GBIF-Taxonomie als horizontale Kette von Rang-Wert-Paaren
+// (Reich › Stamm › Klasse › … ), lässt fehlende Ränge einfach weg.
 function TaxChain({ tax }: { tax: GbifTaxonomy }) {
   const levels = [
     { label: 'Reich',   val: tax.reich ?? 'Animalia' },
@@ -139,6 +169,12 @@ function TaxChain({ tax }: { tax: GbifTaxonomy }) {
   );
 }
 
+// Mehrstufiges Modal zum Anlegen eines neuen Taxonomie-Eintrags. Führt den
+// Nutzer durch: (1) Artname eingeben und per GBIF suchen, (2a) bei
+// eindeutigem Treffer direkt bestätigen, (2b) bei mehreren Kandidaten einen
+// auswählen, oder (3) komplett manuell erfassen (landet als Einreichung zur
+// Moderation). onSuccess(refreshTree) signalisiert dem Elternteil, ob der
+// Taxonomie-Baum neu geladen werden muss (nur bei sofort aktiven GBIF-Einträgen).
 function CreateModal({ onClose, onSuccess }: {
   onClose: () => void;
   onSuccess: (refreshTree: boolean) => void;
@@ -152,6 +188,8 @@ function CreateModal({ onClose, onSuccess }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Fragt GBIF mit dem eingegebenen Artnamen ab und schaltet je nach Ergebnis
+  // zum Bestätigungs- oder Vorschlags-Schritt weiter.
   const handleSearch = async () => {
     const name = speciesName.trim();
     if (!name) { setError('Bitte einen Artnamen eingeben.'); return; }
@@ -170,6 +208,9 @@ function CreateModal({ onClose, onSuccess }: {
     }
   };
 
+  // Übernimmt einen GBIF-Treffer/-Vorschlag per usageKey: das Backend legt
+  // daraus sofort einen (bereits freigegebenen) Taxonomie-Eintrag an, daher
+  // wird onSuccess(true) aufgerufen, um den Baum neu zu laden.
   const handleGbifConfirm = async (usageKey: number) => {
     setSaving(true);
     setError(null);
@@ -187,6 +228,10 @@ function CreateModal({ onClose, onSuccess }: {
     }
   };
 
+  // Reicht eine manuell erfasste Taxonomie als Vorschlag ein (Bearer-Token-
+  // Auth, da die Einreichung dem einreichenden Nutzer zugeordnet werden
+  // muss). Der Eintrag ist erst nach Moderator-Freigabe sichtbar, daher wird
+  // hier nur der "submitted"-Abschluss-Screen gezeigt statt der Baum neu geladen.
   const handleManualSubmit = async () => {
     const { stamm, klasse, ordnung, familie, gattung, art } = manual;
     if (!stamm.trim() || !klasse.trim() || !ordnung.trim() || !familie.trim() || !gattung.trim() || !art.trim()) {
@@ -216,6 +261,8 @@ function CreateModal({ onClose, onSuccess }: {
     }
   };
 
+  // Kleiner Helper, der ein einzelnes Formularfeld für den manuellen
+  // Eingabe-Schritt rendert (Reduziert Wiederholung für die 6 Rang-Felder unten).
   const mf = (field: keyof typeof manual, label: string, placeholder: string) => (
     <div className="form-group">
       <label className="form-label">{label} <span className="required">*</span></label>
@@ -380,6 +427,9 @@ function CreateModal({ onClose, onSuccess }: {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+// Hauptkomponente der Taxonomie-Seite: verwaltet den Baum-Navigationszustand
+// (Breadcrumb), lädt Taxonomie- und Tierdaten, und stellt Aktionen zum
+// Anlegen/Löschen von Taxonomie-Einträgen bereit.
 export default function TaxonomiePage() {
   const { isSignedIn, getToken, userId: clerkId } = useAuth();
   const [taxonomies, setTaxonomies] = useState<TaxonomyEntry[]>([]);
@@ -398,6 +448,8 @@ export default function TaxonomiePage() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
 
+  // Lädt den kompletten (flachen) Taxonomie-Baum vom Backend; wird sowohl
+  // beim initialen Laden als auch nach dem Anlegen eines neuen Eintrags aufgerufen.
   const loadTaxonomies = () =>
     fetch('http://localhost:5099/api/taxonomy').then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -405,6 +457,8 @@ export default function TaxonomiePage() {
     });
 
   // Fetch role
+  // Lädt die Rolle des eingeloggten Nutzers per Bearer-Token, um zu
+  // entscheiden, ob Löschen-Buttons (canModerate) angezeigt werden.
   useEffect(() => {
     if (!clerkId) return;
     let cancelled = false;
@@ -423,6 +477,8 @@ export default function TaxonomiePage() {
   }, [clerkId, getToken]);
 
   // Load taxonomy + animals in parallel
+  // Initiales Laden von Taxonomie-Baum und Tierliste (einmalig beim Mount);
+  // beide werden gebraucht, um pro Taxonomie-Knoten die Tieranzahl zu berechnen.
   useEffect(() => {
     Promise.all([
       loadTaxonomies(),
@@ -443,16 +499,25 @@ export default function TaxonomiePage() {
   }, []);
 
   // Which node is currently active
+  // Der zuletzt angeklickte Breadcrumb-Eintrag bestimmt die aktuelle Ebene;
+  // visibleNodes sind alle direkten Kinder dieses Knotens (null = oberste Ebene/Reich).
   const currentParentId = breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1].id : null;
   const visibleNodes = taxonomies.filter(t => (t.parentId ?? null) === currentParentId);
 
+  // Anzahl direkter Unter-Knoten (für die "X Untergruppen"-Anzeige auf der Kachel).
   const childCount = (nodeId: number) => taxonomies.filter(t => t.parentId === nodeId).length;
 
+  // Anzahl Tiere, die diesem Knoten ODER einem seiner Nachfahren zugeordnet
+  // sind (nutzt getSubtreeIds, damit z. B. eine Familie alle Tiere ihrer Arten mitzählt).
   const animalCount = (nodeId: number) => {
     const ids = getSubtreeIds(nodeId, taxonomies);
     return animals.filter(a => a.taxonomyId != null && ids.has(a.taxonomyId)).length;
   };
 
+  // Navigiert in den Baum hinein: hat der Knoten Kinder, wird nur der
+  // Breadcrumb erweitert (nächste Kachel-Ebene wird angezeigt); ist es ein
+  // Blattknoten (keine Kinder mehr, z. B. eine Art), werden stattdessen die
+  // zugeordneten Tiere geladen und die Tierliste angezeigt.
   const handleNodeClick = (node: TaxonomyEntry) => {
     const hasChildren = taxonomies.some(t => t.parentId === node.id);
     if (hasChildren) {
@@ -466,6 +531,8 @@ export default function TaxonomiePage() {
     }
   };
 
+  // Springt beim Klick auf einen Breadcrumb-Eintrag zurück auf diese Ebene
+  // (index < 0 = zurück zur Wurzel "Alle Taxa") und verlässt die Tieransicht.
   const handleBreadcrumbNav = (index: number) => {
     if (index < 0) {
       setBreadcrumb([]);
@@ -475,8 +542,13 @@ export default function TaxonomiePage() {
     setShowAnimals(null);
   };
 
+  // Nur Moderator/Admin dürfen Taxonomie-Knoten löschen (steuert die
+  // Sichtbarkeit des Löschen-Buttons auf den Kacheln).
   const canModerate = userRole === 'Moderator' || userRole === 'Admin';
 
+  // Löscht einen Taxonomie-Knoten nach Bestätigungsdialog. Befindet sich der
+  // gelöschte Knoten am Ende des aktuellen Breadcrumbs, wird eine Ebene
+  // zurücknavigiert, damit die Ansicht konsistent bleibt.
   const handleDelete = async (e: React.MouseEvent, node: TaxonomyEntry) => {
     e.stopPropagation();
     setDeleteError(null);
@@ -498,6 +570,9 @@ export default function TaxonomiePage() {
     }
   };
 
+  // Schließt das Create-Modal und lädt bei Bedarf (refreshTree=true, also nur
+  // bei sofort aktiven GBIF-Einträgen) den Taxonomie-Baum neu, damit der neue
+  // Knoten direkt sichtbar wird.
   const handleModalSuccess = async (refreshTree: boolean) => {
     setShowCreateModal(false);
     if (refreshTree) {
@@ -510,6 +585,7 @@ export default function TaxonomiePage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite; Abschnitte sind unten mit „── ── " markiert. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

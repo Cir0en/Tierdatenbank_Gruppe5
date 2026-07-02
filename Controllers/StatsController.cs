@@ -5,6 +5,12 @@ using TodoApi.Models;
 
 namespace TodoApi.Controllers;
 
+/// <summary>
+/// Liefert aggregierte Statistiken für das Moderator-/Admin-Dashboard (Taxonomie-Einreichungen,
+/// Sammlungsstatus, Ausleihen, Nutzeraktivität). Erfordert Anmeldung ([Authorize]) sowie zusätzlich
+/// die Rolle Moderator oder Admin (siehe <see cref="GetModOrAdminAsync"/>); gebannte oder gelöschte
+/// Nutzer werden dabei explizit ausgeschlossen.
+/// </summary>
 [ApiController]
 [Route("api/stats")]
 [Authorize]
@@ -14,6 +20,8 @@ public class StatsController : ControllerBase
 
     public StatsController(NeondbContext db) => _db = db;
 
+    // Prüft, ob der aktuell angemeldete Nutzer die Rolle Moderator oder Admin hat
+    // und weder gebannt noch (soft-)gelöscht ist. Gibt null zurück, wenn keine Berechtigung besteht.
     private async Task<User?> GetModOrAdminAsync()
     {
         var clerkId = User.FindFirst("sub")?.Value;
@@ -25,6 +33,9 @@ public class StatsController : ControllerBase
             u.DeletedAt == null);
     }
 
+    // GET /api/stats/moderator — Kennzahlen für das Moderator-Dashboard: Taxonomie-Einreichungen
+    // nach Status, Sammlungsobjekte nach Status, Ausleihen (inkl. überfällig) sowie die letzten 8 Entscheidungen.
+    // Nur für Moderator/Admin.
     [HttpGet("moderator")]
     public async Task<IActionResult> GetModeratorStats()
     {
@@ -82,6 +93,8 @@ public class StatsController : ControllerBase
         });
     }
 
+    // GET /api/stats/moderator/users — Nutzeraktivitätsübersicht (Taxonomie-Einreichungen und aktive/
+    // überfällige Ausleihen je Nutzer) für das Moderator-Dashboard. Nur für Moderator/Admin.
     [HttpGet("moderator/users")]
     public async Task<IActionResult> GetUserActivity()
     {

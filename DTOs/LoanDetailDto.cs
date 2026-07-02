@@ -1,5 +1,6 @@
 namespace TodoApi.DTOs;
 
+/// <summary>Response-DTO für die Detailansicht einer Ausleihe, angereichert mit Objekt- und Nutzernamen sowie Überfälligkeitsstatus.</summary>
 public class LoanDetailDto
 {
     public int Id { get; set; }

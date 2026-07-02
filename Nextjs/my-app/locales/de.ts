@@ -1,3 +1,6 @@
+// Deutsche Übersetzungstabelle für den i18n-Kontext (siehe contexts/LanguageContext.tsx).
+// Reine Schlüssel/Wert-Sammlung nach Bereichen gruppiert (nav, settings, common) –
+// die Struktur muss zu locales/en.ts (Typ `Translations`) passen.
 const de = {
   nav: {
     dashboard:  'Dashboard',

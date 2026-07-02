@@ -1,5 +1,6 @@
 namespace TodoApi.DTOs;
 
+/// <summary>Response-DTO für ein einzelnes Objekt/Tier innerhalb einer Sammlungsübersicht (verdichtete Sicht auf CollectItem).</summary>
 public class CollectionItemDto
 {
     public int Id { get; set; }

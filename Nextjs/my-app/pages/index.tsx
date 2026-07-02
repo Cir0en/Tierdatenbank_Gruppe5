@@ -8,6 +8,19 @@ import Navbar from "../components/Navbar";
 import { Map, MapStyle, config, Marker } from "@maptiler/sdk";
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: / (Startseite / Dashboard)
+// Zweck: Zentrale Übersichtsseite nach dem Login (aber auch für Gäste als
+//        öffentlicher Feed sichtbar): zeigt Kennzahlen, zuletzt erfasste
+//        Objekte, eine Mini-Kartenvorschau, Schnellaktionen und ein
+//        rollenbasiertes Benachrichtigungs-Panel (überfällige Leihen,
+//        ausstehende Taxonomie-Einreichungen für Moderator/Admin, abgelehnte
+//        eigene Taxonomie-Vorschläge).
+// Rollen: Für alle Besucher sichtbar; Inhalte/Aktionen werden je nach
+//        Login-Status (isSignedIn) und Rolle (Nutzer/Moderator/Admin) ein-
+//        bzw. ausgeblendet.
+// ═══════════════════════════════════════════════════════════════════════════
+
 // ── Types ───────────────────────────────────────────────────────────────────
 type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
@@ -15,6 +28,8 @@ type Specimen = {
 };
 type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
 
+// Statische Platzhalterdaten für die "Aktive Leihen"-Kachel (noch nicht an
+// echte Backend-Daten angebunden, im Gegensatz zu notifLoans weiter unten).
 const MOCK_LOANS: Loan[] = [
   { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",  bis: "2026-06-01", status: "aktiv"     },
   { id: "LEI-002", objekt: "Carabus violaceus",  an: "Prof. Weber", bis: "2026-04-30", status: "überfällig"},
@@ -22,6 +37,8 @@ const MOCK_LOANS: Loan[] = [
 ];
 
 // ── Sub-components ──────────────────────────────────────────────────────────
+
+// Kleine Kennzahlen-Kachel (z. B. "Objekte gesamt", "Ausstehend").
 function StatCard({ value, label, sub, accent }: { value: string | number; label: string; sub?: string; accent?: boolean }) {
   return (
     <div className={`stat-card${accent ? " stat-card--accent" : ""}`}>
@@ -32,6 +49,7 @@ function StatCard({ value, label, sub, accent }: { value: string | number; label
   );
 }
 
+// Farbiges Status-Badge für Objekt- oder Leihe-Status (grün/gelb/rot/grau je nach Zustand).
 function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] }) {
   const map: Record<string, string> = {
     freigegeben: "pill--green",
@@ -45,6 +63,10 @@ function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] })
 }
 
 // ── Main Component ──────────────────────────────────────────────────────────
+
+// Hauptkomponente der Startseite/des Dashboards. Kombiniert mehrere unabhängige
+// Datenquellen (Objektliste, Mini-Karte, Benachrichtigungen) über separate
+// useEffect-Hooks mit eigenem Polling-Intervall.
 export default function HomePage() {
   const { isSignedIn, isLoaded, getToken, userId: clerkId } = useAuth();
   const { signOut } = useClerk();
@@ -68,6 +90,9 @@ export default function HomePage() {
   const miniMapInstance  = useRef<Map | null>(null);
   const notifWrapRef     = useRef<HTMLDivElement>(null);
 
+  // Lädt den öffentlichen "zuletzt erfasste Objekte"-Feed (funktioniert auch
+  // ohne Login, da hier kein Auth-Header mitgeschickt wird) und pollt ihn alle
+  // 5 Sekunden, damit neu erfasste Tiere zeitnah auftauchen.
   useEffect(() => {
     const fetchAnimals = async () => {
       try {
@@ -83,6 +108,9 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Initialisiert die MapTiler-Mini-Kartenvorschau einmalig (nur wenn noch
+  // keine Instanz existiert) und trägt anschließend alle bekannten Fundorte
+  // als Marker ein. Aufräumen der Karteninstanz beim Unmount.
   useEffect(() => {
     if (!miniMapContainer.current || miniMapInstance.current) return;
 
@@ -119,6 +147,12 @@ export default function HomePage() {
   }, []);
 
   // Refresh all notification data (role, pendingTax, loans)
+  // Lädt alle Daten, die für das Benachrichtigungs-Panel benötigt werden:
+  // eigene Rolle, überfällige/aktive Leihen und (für Mod/Admin) ausstehende
+  // Taxonomie-Einreichungen. Bricht früh ab, wenn kein Nutzer eingeloggt ist.
+  // Hinweis: Hier werden zwei unterschiedliche Auth-Muster nebeneinander
+  // verwendet — Bearer-Token (getToken()) für /users/me und /taxonomy/*,
+  // aber der 'X-Clerk-User-Id'-Header für /api/loan (siehe auch Sammlung.tsx/leihe.tsx).
   const refreshNotifs = useCallback(async () => {
     if (!clerkId) return;
     try {
@@ -185,13 +219,19 @@ export default function HomePage() {
   const pending = specimens.filter((s) => s.status === "ausstehend").length;
   const overdue = notifLoans.filter((l) => l.isOverdue).length;
 
+  // Markiert eine abgelehnte Taxonomie-Einreichung als "gelesen": die id wird
+  // nur lokal (localStorage) gemerkt, damit sie beim nächsten Besuch nicht
+  // erneut als Benachrichtigung erscheint (kein Backend-Aufruf nötig).
   const handleDismissRejection = (id: number) => {
     const next = new Set(dismissedIds).add(id);
     setDismissedIds(next);
     try { localStorage.setItem("dismissed_tax_rejections", JSON.stringify([...next])); } catch {}
   };
 
-  // Rollenbasierte Benachrichtigungen
+  // Rollenbasierte Benachrichtigungen: baut die Liste der im Panel gezeigten
+  // Einträge aus den geladenen Daten zusammen (überfällige Leihen für alle,
+  // ausstehende Taxonomie-Freigaben nur für Moderator/Admin, eigene
+  // abgelehnte Einreichungen abzüglich bereits ausgeblendeter).
   type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number };
   const notifications: Notif[] = [];
   if (overdue > 0)
@@ -201,6 +241,7 @@ export default function HomePage() {
   for (const s of rejectedSubs.filter((s) => !dismissedIds.has(s.id)))
     notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id });
 
+  // Client-seitige Volltextsuche über Name, Taxon und Fundort der geladenen Objekte.
   const q = search.toLowerCase();
   const filteredSpecimens = q
     ? specimens.filter(s =>
@@ -212,6 +253,7 @@ export default function HomePage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für das Dashboard; Abschnitte sind unten mit „── ── " markiert. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Roboto+Mono:wght@300;400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

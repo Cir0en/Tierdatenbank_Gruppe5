@@ -6,9 +6,23 @@ import { useRouter } from 'next/router';
 import Navbar from '../components/Navbar';
 
 const API = 'http://localhost:5099';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: /admin
+// Zweck: Administrationsbereich für Systemverantwortliche: Benutzerverwaltung
+//        (Rolle ändern, Nutzer löschen, sperren/entsperren) sowie eine
+//        Übersicht über System-Kennzahlen (Objekte, Arten, Nutzer, Ausleihen)
+//        und eine (aktuell teilweise statische) Aktivitäts-Feed-Ansicht.
+// Rollen: Ausschließlich für Rolle "Admin" zugänglich. Nicht eingeloggte
+//        Nutzer werden zum Login umgeleitet; eingeloggte Nutzer ohne
+//        Admin-Rolle sehen eine Debug-Info statt der Seite (kein Redirect,
+//        vermutlich zu Diagnosezwecken während der Entwicklung).
+// ═══════════════════════════════════════════════════════════════════════════
+
 const ROLES = ['Nutzer', 'Moderator', 'Admin'] as const;
 type Role = typeof ROLES[number];
 
+// Ein Eintrag der Benutzerverwaltungs-Tabelle (/api/users).
 interface UserEntry {
   id: number;
   clerkId: string;
@@ -21,6 +35,7 @@ interface UserEntry {
   isBanned: boolean;
 }
 
+// Aggregierte System-Kennzahlen für die Stat-Kacheln (/api/users/stats).
 interface Stats {
   totalUsers: number;
   totalObjects: number;
@@ -29,6 +44,7 @@ interface Stats {
   pendingTax: number;
 }
 
+// Ordnet einer Nutzerrolle die passende Badge-CSS-Klasse zu (Farbe je Rolle).
 function roleBadgeClass(role: string | null) {
   switch (role) {
     case 'Admin':     return 'rb rb--admin';
@@ -38,6 +54,8 @@ function roleBadgeClass(role: string | null) {
   }
 }
 
+// Berechnet die Avatar-Initialen eines Nutzers (aus Vor-/Nachname, sonst
+// aus den ersten beiden Zeichen des Usernamens).
 function initials(u: UserEntry) {
   const fn = u.firstName ?? '';
   const ln = u.lastName  ?? '';
@@ -45,6 +63,9 @@ function initials(u: UserEntry) {
   return u.username.slice(0, 2).toUpperCase();
 }
 
+// Hauptkomponente der Admin-Seite: regelt Rollen-/Zugriffsschutz, lädt
+// Nutzerliste und Statistiken, und bietet Aktionen zum Ändern von Rollen,
+// Sperren/Entsperren und Löschen von Nutzern.
 export default function AdminPage() {
   const { user, isLoaded: userLoaded } = useUser();
   const { isSignedIn, getToken } = useAuth();
@@ -57,6 +78,10 @@ export default function AdminPage() {
   const [saving, setSaving] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
+  // Zentraler Fetch-Wrapper für alle Admin-API-Aufrufe: hängt automatisch das
+  // Clerk-Bearer-Token an (Auth-Muster dieser Seite, im Gegensatz zum
+  // 'X-Clerk-User-Id'-Header, der z. B. in Sammlung.tsx/leihe.tsx verwendet wird)
+  // und setzt bei vorhandenem Body den Content-Type-Header.
   const apiFetch = useCallback(
   async (
     path: string,
@@ -128,6 +153,8 @@ export default function AdminPage() {
     if (!isSignedIn) { router.replace('/login'); return; }
   }, [userLoaded, isSignedIn, router]);
 
+  // Lädt Nutzerliste und System-Statistiken parallel; wird nur für
+  // bestätigte Admins aufgerufen (siehe useEffect direkt darunter).
   const fetchData = useCallback(async () => {
     try {
       const [usersRes, statsRes] = await Promise.all([
@@ -156,6 +183,8 @@ export default function AdminPage() {
     }
   }, [apiFetch]);
 
+  // Lädt die Verwaltungsdaten erst, sobald sowohl Clerk als auch die
+  // DB-Rollenprüfung abgeschlossen sind und der Nutzer tatsächlich Admin ist.
   useEffect(() => {
     if (
       userLoaded &&
@@ -171,6 +200,8 @@ export default function AdminPage() {
     fetchData
   ]);
 
+  // Ändert die Rolle eines Nutzers und aktualisiert die lokale Liste
+  // optimistisch, sobald das Backend die Änderung bestätigt hat.
   const handleRoleChange = async (userId: number, role: Role) => {
     setSaving(userId);
     try {
@@ -187,6 +218,10 @@ export default function AdminPage() {
     }
   };
 
+  // Sperrt/entsperrt einen Nutzer über die ban/unban-Endpunkte (Aktion wird
+  // anhand des aktuellen isBanned-Werts bestimmt) und aktualisiert die
+  // lokale Liste entsprechend. Hinweis: aktuell gibt es dafür keinen
+  // sichtbaren Button in der Tabelle unten (nur Rolle ändern/Löschen).
   const handleBanChange = async (
   userId: number,
   currentlyBanned: boolean
@@ -234,6 +269,8 @@ export default function AdminPage() {
   }
 };
 
+  // Löscht einen Nutzer endgültig (nach Bestätigung über die deleteConfirm-
+  // Inline-UI in der Tabelle) und entfernt ihn aus der lokalen Liste.
   const handleDelete = async (userId: number) => {
     try {
       const res = await apiFetch(`/api/users/${userId}`, { method: 'DELETE' });
@@ -246,12 +283,17 @@ export default function AdminPage() {
     }
   };
 
+  // Solange Clerk-Nutzerdaten oder die DB-Rollenprüfung noch laufen, nur
+  // einen Ladehinweis anzeigen statt verfrüht Zugriff zu verweigern.
   if (!userLoaded || !roleLoaded) return (
     <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Laden…</div>
   );
   if (!isSignedIn) return null;
 
   // DEBUG-Seite: zeigt was Clerk zurückgibt
+  // Statt eines stillen Redirects wird hier absichtlich eine Debug-Ansicht
+  // gerendert, die Rolle/Metadata offenlegt — hilfreich zur Fehlersuche bei
+  // Rollenzuweisungsproblemen, sollte aber vor Produktivbetrieb überprüft werden.
   if (currentRole !== 'Admin') return (
     <div style={{ padding: 40, fontFamily: 'monospace', fontSize: 14 }}>
       <h2 style={{ marginBottom: 16 }}>⛔ Kein Admin-Zugriff — Debug-Info:</h2>
@@ -266,6 +308,7 @@ export default function AdminPage() {
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite. */}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; background: #f8f9fa; font-family: 'Inter', system-ui, sans-serif; font-size: 13px; overflow: hidden; }

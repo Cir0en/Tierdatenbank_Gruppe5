@@ -1,5 +1,6 @@
 namespace TodoApi.DTOs;
 
+/// <summary>Response-DTO für einen Fundort inkl. Zusatzinfos (ob er Kind-Knoten hat, Anzahl zugeordneter Objekte).</summary>
 public class GeoLocationDto
 {
     public int Id { get; set; }
@@ -13,6 +14,7 @@ public class GeoLocationDto
     public int ItemCount { get; set; }
 }
 
+/// <summary>Request-DTO zum Anlegen eines neuen Fundorts.</summary>
 public class CreateGeoLocationDto
 {
     public int? ParentId { get; set; }
@@ -23,6 +25,7 @@ public class CreateGeoLocationDto
     public string? Type { get; set; }
 }
 
+/// <summary>Response-DTO für einen einzelnen Marker auf der Karten-Ansicht (Objekt + Fundort + zugehörige Sammlung/Taxonomie).</summary>
 public class GeoMapItemDto
 {
     public int ItemId { get; set; }

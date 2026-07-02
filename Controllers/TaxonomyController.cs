@@ -7,6 +7,13 @@ using System.Net.Http.Json;
 
 namespace TodoApi.Controllers
 {
+    /// <summary>
+    /// Verwaltet die Taxonomie-Hierarchie (Reich/Stamm/Klasse/Ordnung/Familie/Gattung/Art) sowie
+    /// den Workflow für neue Taxonomie-Vorschläge (TaxonomySubmissions). Neue Taxonomien können
+    /// entweder automatisch über die GBIF-API (externe Taxonomie-Datenbank) abgeglichen und übernommen
+    /// werden, oder manuell von Nutzern eingereicht werden und müssen dann von einem Moderator/Admin
+    /// geprüft (approve/reject) werden, bevor sie in der Haupttabelle "Taxonomies" landen.
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class TaxonomyController : ControllerBase
@@ -20,6 +27,8 @@ namespace TodoApi.Controllers
             _httpClientFactory = httpClientFactory;
         }
 
+        // Prüft, ob GBIF für ein Taxon alle benötigten Rangstufen zwischen Stamm und Art geliefert hat.
+        // Fehlt eine Ebene, ist die Taxonomie-Kette unvollständig und darf nicht automatisch übernommen werden.
         private static bool HasCompleteAnimalTaxonomy(GbifSpeciesDto gbif)
         {
             return !string.IsNullOrWhiteSpace(gbif.Phylum)
@@ -30,6 +39,8 @@ namespace TodoApi.Controllers
                 && !string.IsNullOrWhiteSpace(gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName);
         }
 
+        // Legt (bzw. findet) die komplette Taxonomie-Kette für ein von GBIF geliefertes Taxon an,
+        // indem die GBIF-Felder auf die interne Rangkette (Stamm...Art) gemappt werden.
         private async Task<Taxonomy> CreateChainFromGbifAsync(GbifSpeciesDto gbif)
         {
             if (!HasCompleteAnimalTaxonomy(gbif))
@@ -45,6 +56,7 @@ namespace TodoApi.Controllers
             );
         }
 
+        // GET /api/taxonomy — listet alle Taxonomie-Einträge (alle Rangstufen, flach, mit ParentId)
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetTaxonomies()
         {
@@ -61,6 +73,12 @@ namespace TodoApi.Controllers
             return Ok(taxonomies);
         }
 
+        // Baut die gesamte Taxonomie-Kette von Stamm bis Art unterhalb von "Animalia" auf.
+        // Für jede Rangstufe wird geprüft, ob unter dem jeweiligen Parent bereits ein Eintrag mit
+        // gleichem Namen existiert (Wiederverwendung); fehlt er, wird er neu angelegt und direkt
+        // als "genehmigt" markiert (IsApproved = true), da diese Kette entweder aus einer bereits
+        // geprüften GBIF-Quelle oder einer soeben freigegebenen Submission stammt.
+        // Gibt am Ende den Blattknoten (die Art) zurück.
         private async Task<Taxonomy> GetOrCreateTaxonomyChainAsync(string stamm,
                                                                     string klasse,
                                                                     string ordnung,
@@ -114,6 +132,7 @@ namespace TodoApi.Controllers
             return parent;
         }
 
+        // GET /api/taxonomy/{id} — Detailansicht eines einzelnen Taxonomie-Eintrags
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetTaxonomy(int id)
         {
@@ -133,6 +152,8 @@ namespace TodoApi.Controllers
             return Ok(taxonomy);
         }
 
+        // POST /api/taxonomy — legt einen einzelnen Taxonomie-Eintrag direkt an (z.B. für Admin-Tools);
+        // wird zunächst als nicht genehmigt (IsApproved = false) angelegt
         [HttpPost]
         public async Task<ActionResult<object>> CreateTaxonomy(CreateTaxonomyDto dto)
         {
@@ -166,7 +187,12 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpGet("gbif")] // rufen wenn Nutzer die Artname eingibt
+        // GET /api/taxonomy/gbif — wird aufgerufen, wenn der Nutzer einen Artnamen eingibt.
+        // Fragt die GBIF-API nach einer eindeutigen Übereinstimmung (species/match). Nur bei hoher
+        // Konfidenz (>= 90), eindeutigem Treffer und vollständiger Taxonomie-Kette gilt der Treffer
+        // als "sicher" und kann automatisch übernommen werden; ansonsten werden per species/suggest
+        // bis zu 5 Vorschläge zur manuellen Bestätigung durch den Nutzer geliefert.
+        [HttpGet("gbif")]
         public async Task<ActionResult<object>> PreviewFromGbif([FromQuery] GbifLookupDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.SpeciesName))
@@ -181,6 +207,9 @@ namespace TodoApi.Controllers
 
             var gbif = await client.GetFromJsonAsync<GbifSpeciesDto>(matchUrl);
 
+            // "Sicherer" Treffer nur, wenn GBIF ein eindeutiges Taxon mit hoher Konfidenz liefert
+            // und alle benötigten Rangstufen vorhanden sind — sonst besteht das Risiko einer falschen
+            // automatischen Zuordnung und der Nutzer muss manuell bestätigen.
             var isSafeMatch =
                 gbif != null &&
                 gbif.UsageKey.HasValue &&
@@ -243,7 +272,10 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("gbif/confirm")] // für den Fall, wenn Nutzer Suggestion annimmt
+        // POST /api/taxonomy/gbif/confirm — wird aufgerufen, wenn der Nutzer einen der Vorschläge
+        // aus PreviewFromGbif manuell bestätigt. Lädt das Taxon per GBIF UsageKey, prüft, dass es zu
+        // Animalia gehört und Rang "Art" hat, und legt anschließend die komplette Taxonomie-Kette an.
+        [HttpPost("gbif/confirm")]
         public async Task<ActionResult<object>> ConfirmGbifTaxonomy(ConfirmGbifTaxonomyDto dto)
         {
             if (dto.UsageKey <= 0)
@@ -274,7 +306,10 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpPost("submissions")] // für manuelle Einträge
+        // POST /api/taxonomy/submissions — für manuelle Taxonomie-Einträge, wenn GBIF keinen sicheren
+        // Treffer liefert. Erfordert Anmeldung; landet zunächst als "pending" in der Submissions-Tabelle
+        // und muss von einem Moderator/Admin geprüft werden (siehe Approve/Reject unten).
+        [HttpPost("submissions")]
         [Authorize]
         public async Task<ActionResult<object>> CreateTaxonomySubmission(CreateTaxonomySubmissionDto dto)
         {
@@ -322,7 +357,9 @@ namespace TodoApi.Controllers
             });
         }
 
-        [HttpGet("submissions/my")] // eigene Einreichungen inkl. Ablehnungsgrund
+        // GET /api/taxonomy/submissions/my — eigene Einreichungen des angemeldeten Nutzers
+        // inkl. Status und Ablehnungsgrund (ModeratorNote)
+        [HttpGet("submissions/my")]
         [Authorize]
         public async Task<ActionResult<object>> GetMySubmissions()
         {
@@ -351,8 +388,11 @@ namespace TodoApi.Controllers
             return Ok(submissions);
         }
 
-        [HttpGet("submissions/pending")] // Submissions für Moderator zu prüfen und freigeben oder ablehenn
-        // WICHTIG: später nur über Mod Ansicht aufrufbar! Später anpassen
+        // GET /api/taxonomy/submissions/pending — offene Einreichungen, die ein Moderator/Admin
+        // noch prüfen (freigeben oder ablehnen) muss.
+        // WICHTIG: aktuell fehlt hier noch eine [Authorize]/Rollenprüfung — später auf reine
+        // Moderator/Admin-Ansicht beschränken! (bestehendes TODO, siehe Kommentar im Original)
+        [HttpGet("submissions/pending")]
         public async Task<ActionResult<object>> GetPendingTaxonomySubmissions()
         {
             var submissions = await _context.TaxonomySubmissions
@@ -377,7 +417,10 @@ namespace TodoApi.Controllers
             return Ok(submissions);
         }
 
-        [HttpPost("submissions/{id}/approve")] // nach approval in der main Taxonomie Tabelle verfügbar
+        // POST /api/taxonomy/submissions/{id}/approve — genehmigt eine Einreichung: baut die
+        // Taxonomie-Kette in der Haupttabelle auf (bzw. verwendet vorhandene Einträge) und markiert
+        // die Submission als "approved". Nur einmalig möglich (Status muss "pending" sein).
+        [HttpPost("submissions/{id}/approve")]
         public async Task<ActionResult<object>> ApproveTaxonomySubmission(int id,
                                                                         ReviewTaxonomySubmissionDto dto)
         {
@@ -413,6 +456,10 @@ namespace TodoApi.Controllers
             });
         }
 
+        // DELETE /api/taxonomy/{id} — löscht einen Taxonomie-Eintrag (typischerweise Moderator/Admin-Funktion).
+        // Schutzregeln: das Wurzel-Reich "Animalia" darf nie gelöscht werden, ebenso wenig Einträge,
+        // die noch untergeordnete Taxonomie-Einträge oder zugeordnete Fundobjekte (CollectItems) haben —
+        // sonst würden Referenzen ins Leere zeigen bzw. eine ganze Teilhierarchie verwaist.
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteTaxonomy(int id)
         {
@@ -435,8 +482,10 @@ namespace TodoApi.Controllers
             return NoContent();
         }
 
-        [HttpPost("submissions/{id}/reject")] // abgelehnte bleiben in der Submissions tabelle,
-                                              // werden nicht zu der main hinzugefügt
+        // POST /api/taxonomy/submissions/{id}/reject — lehnt eine Einreichung ab. Abgelehnte
+        // Submissions bleiben (mit Status "rejected" und optionaler Begründung) in der
+        // Submissions-Tabelle erhalten, werden aber nicht in die Haupttabelle "Taxonomies" übernommen.
+        [HttpPost("submissions/{id}/reject")]
         public async Task<ActionResult<object>> RejectTaxonomySubmission(int id,
                                                                         ReviewTaxonomySubmissionDto dto)
         {

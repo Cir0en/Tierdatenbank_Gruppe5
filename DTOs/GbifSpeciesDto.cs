@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace TodoApi.DTOs;
 
+/// <summary>Response-DTO, das die Antwort der externen GBIF-API (Art-Suche/-Details) auf unsere Modellstruktur abbildet.</summary>
 public class GbifSpeciesDto
 {
     public int? UsageKey { get; set; } // returned by /species/match
