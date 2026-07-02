@@ -146,6 +146,14 @@ public class LoanController : ControllerBase
         if (borrower.Id == currentUser.Id)
             return BadRequest(new { message = "Du kannst ein Objekt nicht an dich selbst verleihen." });
 
+        // Verfügbarkeitsprüfung: Objekt darf nicht bereits aktiv verliehen sein.
+        // Schließt den Race-Window nicht vollständig (siehe Unique-Index unten für den harten Schutz),
+        // liefert aber im Normalfall sofort eine verständliche Fehlermeldung statt einer DB-Exception.
+        var alreadyLoaned = await _context.Loans
+            .AnyAsync(l => l.ObjectId == dto.ObjectId && l.Status == "offen");
+        if (alreadyLoaned)
+            return Conflict(new { message = "Dieses Objekt ist bereits aktiv verliehen." });
+
         var loan = new Loan
         {
             ObjectId   = dto.ObjectId,
@@ -157,7 +165,16 @@ public class LoanController : ControllerBase
         };
 
         _context.Loans.Add(loan);
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
+        {
+            // Zwei parallele Requests haben den obigen Check gleichzeitig passiert;
+            // der DB-seitige Unique-Index (idx_loans_object_open_unique) verhindert die doppelte Ausleihe.
+            return Conflict(new { message = "Dieses Objekt wurde soeben von einer anderen Person ausgeliehen." });
+        }
 
         var result = new LoanDetailDto
         {

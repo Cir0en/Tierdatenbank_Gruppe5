@@ -108,7 +108,7 @@ export default function DashboardPage() {
     if (!clerkId) return;
     fetch(`${API}/api/loan`, { headers: { "X-Clerk-User-Id": clerkId } })
       .then((r) => r.ok ? r.json() : [])
-      .then((data: Loan[]) => setLoans(data.filter((l) => l.status !== "zurück")))
+      .then((data: Loan[]) => setLoans(data.filter((l) => l.status !== "zurückgegeben")))
       .catch(() => {});
   }, [clerkId]);
 

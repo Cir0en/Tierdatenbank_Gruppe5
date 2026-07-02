@@ -203,6 +203,9 @@ export default function LeihePage() {
     try {
       const res = await fetch(`${API}/api/loan`, { headers });
       if (res.ok) setLoans(await res.json());
+      else setActionError(`Fehler ${res.status} — Leihen konnten nicht geladen werden.`);
+    } catch {
+      setActionError("Server nicht erreichbar — Leihen konnten nicht geladen werden.");
     } finally {
       setLoading(false);
     }
@@ -210,12 +213,16 @@ export default function LeihePage() {
 
   const fetchSupportData = async () => {
     if (!clerkId) return;
-    const [objRes, usrRes] = await Promise.all([
-      fetch(`${API}/api/loan/my-objects`, { headers }),
-      fetch(`${API}/api/loan/users`, { headers }),
-    ]);
-    if (objRes.ok) setObjects(await objRes.json());
-    if (usrRes.ok) setUsers(await usrRes.json());
+    try {
+      const [objRes, usrRes] = await Promise.all([
+        fetch(`${API}/api/loan/my-objects`, { headers }),
+        fetch(`${API}/api/loan/users`, { headers }),
+      ]);
+      if (objRes.ok) setObjects(await objRes.json());
+      if (usrRes.ok) setUsers(await usrRes.json());
+    } catch {
+      setActionError("Server nicht erreichbar — Objekte/Nutzer konnten nicht geladen werden.");
+    }
   };
 
   useEffect(() => {
@@ -226,26 +233,41 @@ export default function LeihePage() {
   const handleStatusChange = async (loanId: number, status: string) => {
     if (!clerkId) return;
     setActionError(null);
-    const res = await fetch(`${API}/api/loan/${loanId}/status`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "X-Clerk-User-Id": clerkId },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setActionError(body.message ?? `Fehler ${res.status} — Status konnte nicht gesetzt werden.`);
+    try {
+      const res = await fetch(`${API}/api/loan/${loanId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Clerk-User-Id": clerkId },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setActionError(body.message ?? `Fehler ${res.status} — Status konnte nicht gesetzt werden.`);
+      }
+    } catch {
+      setActionError("Server nicht erreichbar — Status konnte nicht gesetzt werden.");
+    } finally {
+      fetchLoans();
     }
-    fetchLoans();
   };
 
   const handleDelete = async (loanId: number) => {
     if (!clerkId) return;
     if (!confirm("Leihe wirklich löschen?")) return;
-    await fetch(`${API}/api/loan/${loanId}`, {
-      method: "DELETE",
-      headers: { "X-Clerk-User-Id": clerkId },
-    });
-    fetchLoans();
+    setActionError(null);
+    try {
+      const res = await fetch(`${API}/api/loan/${loanId}`, {
+        method: "DELETE",
+        headers: { "X-Clerk-User-Id": clerkId },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setActionError(body.message ?? `Fehler ${res.status} — Leihe konnte nicht gelöscht werden.`);
+      }
+    } catch {
+      setActionError("Server nicht erreichbar — Leihe konnte nicht gelöscht werden.");
+    } finally {
+      fetchLoans();
+    }
   };
 
   // Filter

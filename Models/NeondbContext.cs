@@ -136,6 +136,12 @@ public partial class NeondbContext : DbContext
 
             entity.HasIndex(e => e.ObjectId, "idx_loans_object");
 
+            // Verhindert auf DB-Ebene, dass dasselbe Objekt gleichzeitig zwei offene Leihen hat
+            // (siehe sql/2026-07-02_add_unique_open_loan_index.sql für das manuelle Anlegen in Neon).
+            entity.HasIndex(e => e.ObjectId, "idx_loans_object_open_unique")
+                .IsUnique()
+                .HasFilter("status = 'offen'");
+
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.BorrowerId).HasColumnName("borrower_id");
             entity.Property(e => e.EndDate).HasColumnName("end_date");

@@ -47,10 +47,10 @@ public class StatsController : ControllerBase
         var colAusstehend  = await _db.CollectItems.CountAsync(c => c.Status == "ausstehend");
         var colAbgelehnt   = await _db.CollectItems.CountAsync(c => c.Status == "abgelehnt");
 
-        // Loans
+        // Loans (DB-Status ist "offen" für laufende Leihen, nicht "aktiv")
         var loansTotal   = await _db.Loans.CountAsync();
-        var loansActive  = await _db.Loans.CountAsync(l => l.Status == "aktiv");
-        var loansOverdue = await _db.Loans.CountAsync(l => l.EndDate < today && l.Status == "aktiv");
+        var loansActive  = await _db.Loans.CountAsync(l => l.Status == "offen");
+        var loansOverdue = await _db.Loans.CountAsync(l => l.EndDate < today && l.Status == "offen");
 
         // Taxonomies
         var taxTotal    = await _db.Taxonomies.CountAsync(t => t.IsApproved == true);
@@ -104,8 +104,8 @@ public class StatsController : ControllerBase
                 TaxPending  = _db.TaxonomySubmissions.Count(s => s.CreatedBy == u.Id && s.Status == "pending"),
                 TaxApproved = _db.TaxonomySubmissions.Count(s => s.CreatedBy == u.Id && s.Status == "approved"),
                 TaxRejected = _db.TaxonomySubmissions.Count(s => s.CreatedBy == u.Id && s.Status == "rejected"),
-                LoansActive  = _db.Loans.Count(l => l.BorrowerId == u.Id && l.Status == "aktiv"),
-                LoansOverdue = _db.Loans.Count(l => l.BorrowerId == u.Id && l.Status == "aktiv" && l.EndDate < today),
+                LoansActive  = _db.Loans.Count(l => l.BorrowerId == u.Id && l.Status == "offen"),
+                LoansOverdue = _db.Loans.Count(l => l.BorrowerId == u.Id && l.Status == "offen" && l.EndDate < today),
                 LastSubmission = _db.TaxonomySubmissions
                     .Where(s => s.CreatedBy == u.Id)
                     .OrderByDescending(s => s.CreatedAt)
