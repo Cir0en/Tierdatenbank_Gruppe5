@@ -18,4 +18,6 @@ public class CollectionItemDto
     public string? AgeClass { get; set; }
     public decimal? BodyMassGram { get; set; }
     public decimal? BodyLengthMm { get; set; }
+    public int? ImageId { get; set; }
+    public bool ImageStoredInDatabase { get; set; }
 }

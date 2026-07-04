@@ -92,20 +92,32 @@ namespace TodoApi.Controllers
                         Id = item.Id,
                         Name = item.Name,
                         FindDate = item.FindDate,
-                        Status          = item.Status,
-                        Kategorie       = item.Kategorie,
-                        Lebensraum      = item.Lebensraum,
-                        TaxonomyName    = item.Taxonomy != null ? item.Taxonomy.Name : null,
-                        TaxonomyRank    = item.Taxonomy != null ? item.Taxonomy.Rank : null,
+                        Status = item.Status,
+                        Kategorie = item.Kategorie,
+                        Lebensraum = item.Lebensraum,
+                        TaxonomyName = item.Taxonomy != null ? item.Taxonomy.Name : null,
+                        TaxonomyRank = item.Taxonomy != null ? item.Taxonomy.Rank : null,
                         FindingLocation = item.FindingLocation != null ? item.FindingLocation.Name : null,
                         // ältestes hochgeladenes Bild dient als Vorschaubild in der Sammlungsliste
+                        ImageId = item.ObjectImages
+                            .OrderBy(img => img.CreatedAt)
+                            .Select(img => (int?)img.Id)
+                            .FirstOrDefault(),
+
+
                         ImageUrl = item.ObjectImages
                             .OrderBy(img => img.CreatedAt)
                             .Select(img => img.ImageUrl)
                             .FirstOrDefault(),
-                        Description  = item.Description,
-                        Sex          = item.Sex,
-                        AgeClass     = item.AgeClass,
+
+                        ImageStoredInDatabase = item.ObjectImages
+                            .OrderBy(img => img.CreatedAt)
+                            .Select(img => img.ImageData != null)
+                            .FirstOrDefault(),
+
+                        Description = item.Description,
+                        Sex = item.Sex,
+                        AgeClass = item.AgeClass,
                         BodyMassGram = item.BodyMassGram,
                         BodyLengthMm = item.BodyLengthMm,
                     }).ToList()
@@ -114,6 +126,16 @@ namespace TodoApi.Controllers
 
 
             if (collection == null) return NotFound();
+
+            foreach (var item in collection.Items)
+            {
+                if (item.ImageStoredInDatabase && item.ImageId.HasValue)
+                {
+                    item.ImageUrl =
+                        $"/api/images/{item.ImageId.Value}/content";
+                }
+            }
+
             return Ok(collection);
         }
 
