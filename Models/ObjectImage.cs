@@ -15,9 +15,17 @@ public partial class ObjectImage
     public int? ObjectId { get; set; }
 
     /// <summary>Pfad/URL zur Bilddatei (z.B. unterhalb von "/uploads", siehe Program.cs).</summary>
-    public string ImageUrl { get; set; } = null!;
+    public string? ImageUrl { get; set; }
 
     public DateTime? CreatedAt { get; set; }
 
     public virtual CollectItem? Object { get; set; }
+
+    public byte[]? ImageData { get; set; }
+
+    public string? ContentType { get; set; }
+
+    public string? OriginalFileName { get; set; }
+
+    public long? ByteSize { get; set; }
 }
