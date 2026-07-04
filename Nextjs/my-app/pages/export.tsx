@@ -4,7 +4,7 @@
 // CSV-Export ist nur einer von mehreren Bereichen.
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth, useUser, useClerk } from '@clerk/nextjs';
 import { useRouter } from 'next/router';
 import Navbar from '../components/Navbar';
@@ -34,6 +34,49 @@ export default function EinstellungenPage() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // Kann CSV-Daten importieren: nur Moderator/Admin, analog zur Backend-Prüfung in
+  // AnimalsController.ImportCsv (GetModOrAdminAsync).
+  const canImport = profile?.role === 'Admin' || profile?.role === 'Moderator';
+
+  // Lädt eine ausgewählte CSV-Datei zum Import-Endpunkt hoch (gleiches Spaltenformat wie
+  // der Export) und zeigt danach an, wie viele Zeilen importiert/übersprungen wurden.
+  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // erlaubt erneuten Upload derselben Datei
+    if (!file) return;
+
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const token = await getToken();
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${API}/api/animals/import/csv`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
+      setImportResult(await res.json());
+    } catch (e: any) {
+      setImportError(e.message);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // Lädt die gesamte Sammlung als CSV-Datei herunter: ruft den Export-Endpunkt
   // auf, wandelt die Antwort in einen Blob um und stößt darüber einen
@@ -176,6 +219,11 @@ export default function EinstellungenPage() {
         .btn-export:hover { border-color: #059669; color: #059669; background: #f0fdf4; }
         .btn-export:disabled { opacity: .5; cursor: not-allowed; }
 
+        /* Import */
+        .import-result { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 12px; }
+        .import-error-list { margin: 8px 0 0; padding-left: 18px; color: #92400e; }
+        .import-error-list li { margin-bottom: 2px; }
+
         /* Language selector */
         .lang-label { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
         .lang-options { display: flex; gap: 10px; }
@@ -292,6 +340,45 @@ export default function EinstellungenPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Import (nur Moderator/Admin) */}
+              {canImport && (
+                <div className="card">
+                  <div className="card-head">📥 Import</div>
+                  <div className="card-body">
+                    <p className="export-desc">
+                      Importiere Fundobjekte aus einer CSV-Datei (gleiches Spaltenformat wie der Export). Taxonomie, Sammlung und Fundort werden anhand des Namens wiederverwendet oder neu angelegt.
+                    </p>
+                    <div className="export-row">
+                      <button
+                        className="btn-export"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={importing}
+                      >
+                        {importing ? '⏳ Wird importiert…' : '⬆ CSV importieren'}
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        style={{ display: 'none' }}
+                        onChange={handleCsvImport}
+                      />
+                    </div>
+                    {importError && <div className="dialog-error" style={{ marginTop: 14 }}>{importError}</div>}
+                    {importResult && (
+                      <div className="import-result">
+                        {importResult.imported} Objekt(e) importiert, {importResult.skipped} Zeile(n) übersprungen.
+                        {importResult.errors.length > 0 && (
+                          <ul className="import-error-list">
+                            {importResult.errors.map((err, i) => <li key={i}>{err}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Sprache */}
               <div className="card">
