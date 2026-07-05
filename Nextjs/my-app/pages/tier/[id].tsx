@@ -10,6 +10,18 @@ import Navbar from '../../components/Navbar';
 
 const API = 'http://localhost:5099';
 
+
+function resolveImageUrl(imageUrl: string): string {
+  if (
+    imageUrl.startsWith('/api/') ||
+    imageUrl.startsWith('/uploads/')
+  ) {
+    return `${API}${imageUrl}`;
+  }
+
+  return imageUrl;
+}
+
 interface AnimalDetail {
   id: number;
   collectionId: number | null;
@@ -273,7 +285,12 @@ export default function TierDetailPage() {
                   {imgLoading ? (
                     <div className="img-empty-box"><span>⏳</span></div>
                   ) : image ? (
-                    <img src={`${API}${image.imageUrl}`} alt={animal.name ?? ''} className="img-main" />
+                  <img
+                    src={resolveImageUrl(image.imageUrl)}
+                    alt={animal.name ?? ''}
+                    className="img-main"
+                  />
+                    //<img src={`${API}${image.imageUrl}`} alt={animal.name ?? ''} className="img-main" />
                   ) : (
                     <div className="img-empty-box">
                       <span>📷</span>

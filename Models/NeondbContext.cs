@@ -185,6 +185,19 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
             entity.Property(e => e.ImageUrl).HasColumnName("image_url");
+            entity.Property(e => e.ImageData)
+                .HasColumnName("image_data")
+                .HasColumnType("bytea");
+
+            entity.Property(e => e.ContentType)
+                .HasColumnName("content_type")
+                .HasMaxLength(100);
+
+            entity.Property(e => e.OriginalFileName)
+                .HasColumnName("original_file_name");
+
+            entity.Property(e => e.ByteSize)
+                .HasColumnName("byte_size");
             entity.Property(e => e.ObjectId).HasColumnName("object_id");
 
             entity.HasOne(d => d.Object).WithMany(p => p.ObjectImages)

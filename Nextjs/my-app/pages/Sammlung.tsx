@@ -230,6 +230,17 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
 
 const API = 'http://localhost:5099';
 
+function resolveImageUrl(imageUrl: string): string {
+  if (
+    imageUrl.startsWith('/api/') ||
+    imageUrl.startsWith('/uploads/')
+  ) {
+    return `${API}${imageUrl}`;
+  }
+
+  return imageUrl;
+}
+
 type LoanUser = { id: number; username: string; firstName: string | null; lastName: string | null; institution: string | null };
 
 // Modal zum Ausleihen eines einzelnen Sammlungs-Eintrags (Tiers) an einen
@@ -728,7 +739,12 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                 {/* Foto */}
                 <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
-                    <img src={`${API}${item.imageUrl}`} alt={item.name ?? ''} className="animal-card-img" />
+                  <img
+                    src={resolveImageUrl(item.imageUrl)}
+                    alt={item.name ?? ''}
+                    className="animal-card-img"
+                  />
+                    //<img src={`${API}${item.imageUrl}`} alt={item.name ?? ''} className="animal-card-img" />
                   ) : (
                     <div className="animal-card-img-placeholder">
                       <span>📷</span>
