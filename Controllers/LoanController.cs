@@ -39,27 +39,9 @@ public class LoanController : ControllerBase
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var loans = await _context.Loans
-            .Where(l => l.LenderId == currentUser.Id || l.BorrowerId == currentUser.Id)
-            .Select(l => new LoanDetailDto
-            {
-                Id              = l.Id,
-                ObjectId        = l.ObjectId,
-                ObjectName      = l.Object != null ? l.Object.Name : null,
-                LenderId        = l.LenderId,
-                LenderName      = l.Lender != null ? l.Lender.Username : null,
-                LenderFirstName = l.Lender != null ? l.Lender.FirstName : null,
-                LenderLastName  = l.Lender != null ? l.Lender.LastName  : null,
-                BorrowerId        = l.BorrowerId,
-                BorrowerName      = l.Borrower != null ? l.Borrower.Username : null,
-                BorrowerFirstName = l.Borrower != null ? l.Borrower.FirstName : null,
-                BorrowerLastName  = l.Borrower != null ? l.Borrower.LastName  : null,
-                StartDate  = l.StartDate,
-                EndDate    = l.EndDate,
-                Status     = l.Status,
-                // überfällig: Leihe ist noch offen, hat ein Enddatum und dieses liegt in der Vergangenheit
-                IsOverdue  = l.Status == "offen" && l.EndDate != null && l.EndDate < today
-            })
+        var loans = await ProjectLoans(
+                _context.Loans.Where(l => l.LenderId == currentUser.Id || l.BorrowerId == currentUser.Id),
+                today)
             .OrderByDescending(l => l.Id)
             .ToListAsync();
 
@@ -75,34 +57,42 @@ public class LoanController : ControllerBase
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var loan = await _context.Loans
-            .Where(l => l.Id == id && (l.LenderId == currentUser.Id || l.BorrowerId == currentUser.Id))
-            .Select(l => new LoanDetailDto
-            {
-                Id              = l.Id,
-                ObjectId        = l.ObjectId,
-                ObjectName      = l.Object != null ? l.Object.Name : null,
-                LenderId        = l.LenderId,
-                LenderName      = l.Lender != null ? l.Lender.Username : null,
-                LenderFirstName = l.Lender != null ? l.Lender.FirstName : null,
-                LenderLastName  = l.Lender != null ? l.Lender.LastName  : null,
-                BorrowerId        = l.BorrowerId,
-                BorrowerName      = l.Borrower != null ? l.Borrower.Username : null,
-                BorrowerFirstName = l.Borrower != null ? l.Borrower.FirstName : null,
-                BorrowerLastName  = l.Borrower != null ? l.Borrower.LastName  : null,
-                StartDate  = l.StartDate,
-                EndDate    = l.EndDate,
-                Status     = l.Status,
-                // überfällig: Leihe ist noch offen, hat ein Enddatum und dieses liegt in der Vergangenheit
-                IsOverdue  = l.Status == "offen" && l.EndDate != null && l.EndDate < today
-            })
+        var loan = await ProjectLoans(
+                _context.Loans.Where(l => l.Id == id && (l.LenderId == currentUser.Id || l.BorrowerId == currentUser.Id)),
+                today)
             .FirstOrDefaultAsync();
 
         if (loan == null) return NotFound();
         return Ok(loan);
     }
 
-    // GET /api/loan/my-objects — alle Objekte des aktuellen Nutzers (für Auswahlmenü)
+    // Gemeinsame Projektion von Loan -> LoanDetailDto (inkl. Namen der beteiligten Nutzer/Objekte
+    // und berechnetem Überfälligkeitsstatus), damit GetLoans/GetLoan/ExtendLoan nicht denselben
+    // Select-Ausdruck duplizieren müssen.
+    private static IQueryable<LoanDetailDto> ProjectLoans(IQueryable<Loan> query, DateOnly today) =>
+        query.Select(l => new LoanDetailDto
+        {
+            Id              = l.Id,
+            ObjectId        = l.ObjectId,
+            ObjectName      = l.Object != null ? l.Object.Name : null,
+            LenderId        = l.LenderId,
+            LenderName      = l.Lender != null ? l.Lender.Username : null,
+            LenderFirstName = l.Lender != null ? l.Lender.FirstName : null,
+            LenderLastName  = l.Lender != null ? l.Lender.LastName  : null,
+            BorrowerId        = l.BorrowerId,
+            BorrowerName      = l.Borrower != null ? l.Borrower.Username : null,
+            BorrowerFirstName = l.Borrower != null ? l.Borrower.FirstName : null,
+            BorrowerLastName  = l.Borrower != null ? l.Borrower.LastName  : null,
+            StartDate  = l.StartDate,
+            EndDate    = l.EndDate,
+            Status     = l.Status,
+            // überfällig: Leihe ist noch offen, hat ein Enddatum und dieses liegt in der Vergangenheit
+            IsOverdue  = l.Status == "offen" && l.EndDate != null && l.EndDate < today
+        });
+
+    // GET /api/loan/my-objects — alle Objekte des aktuellen Nutzers (für Auswahlmenü), inkl.
+    // IsOnLoan-Flag, damit das Frontend bereits verliehene Objekte in der Auswahl sperren kann,
+    // statt den Nutzer erst beim Absenden mit einem 409-Konflikt zu konfrontieren.
     [HttpGet("my-objects")]
     public async Task<IActionResult> GetMyObjects()
     {
@@ -111,14 +101,21 @@ public class LoanController : ControllerBase
 
         var items = await _context.CollectItems
             .Where(i => i.Collection != null && i.Collection.UserId == currentUser.Id)
-            .Select(i => new { i.Id, i.Name, CollectionName = i.Collection != null ? i.Collection.Name : null })
+            .Select(i => new
+            {
+                i.Id,
+                i.Name,
+                CollectionName = i.Collection != null ? i.Collection.Name : null,
+                IsOnLoan = i.Loans.Any(l => l.Status == "offen")
+            })
             .OrderBy(i => i.Name)
             .ToListAsync();
 
         return Ok(items);
     }
 
-    // GET /api/loan/users — alle anderen Nutzer (für Entleiher-Auswahl)
+    // GET /api/loan/users — alle anderen Nutzer (für Entleiher-Auswahl); gebannte und
+    // (soft-)gelöschte Nutzer werden ausgeschlossen, da an sie nicht sinnvoll verliehen werden kann.
     [HttpGet("users")]
     public async Task<IActionResult> GetUsers()
     {
@@ -126,7 +123,7 @@ public class LoanController : ControllerBase
         if (currentUser == null) return Unauthorized();
 
         var users = await _context.Users
-            .Where(u => u.Id != currentUser.Id && u.Role != "Inaktiv")
+            .Where(u => u.Id != currentUser.Id && !u.IsBanned && u.DeletedAt == null)
             .Select(u => new { u.Id, u.Username, u.FirstName, u.LastName, u.Institution })
             .OrderBy(u => u.Username)
             .ToListAsync();
@@ -214,27 +211,13 @@ public class LoanController : ControllerBase
         return CreatedAtAction(nameof(GetLoan), new { id = loan.Id }, result);
     }
 
-    // GET /api/loan/allowed-status — erlaubte Statuswerte aus DB-Constraint auslesen
-    [HttpGet("allowed-status")]
-    public async Task<IActionResult> GetAllowedStatus()
-    {
-        var conn = _context.Database.GetDbConnection();
-        await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT pg_get_constraintdef(oid)
-            FROM pg_constraint
-            WHERE conname = 'loans_status_check'
-            LIMIT 1;
-            """;
-        var result = await cmd.ExecuteScalarAsync();
-        await conn.CloseAsync();
-        return Ok(new { constraintDef = result?.ToString() });
-    }
-
-    // PUT /api/loan/{id}/status — Status aktualisieren (nur Verleiher)
-    [HttpPut("{id:int}/status")]
-    public async Task<IActionResult> UpdateStatus(int id, UpdateLoanStatusDto dto)
+    // PUT /api/loan/{id}/return — Leihe als zurückgegeben markieren (nur Verleiher, nur aus "offen").
+    // Bewusst nur diese eine Richtung (kein "Reaktivieren" zurück auf "offen"): eine einmal
+    // zurückgegebene Leihe ist abgeschlossen, für einen erneuten Verleih wird eine neue Ausleihe
+    // angelegt (entspricht dem Vorgehen realer Verleihsysteme und vermeidet Verwirrung durch
+    // nachträglich "wiederbelebte" historische Einträge).
+    [HttpPut("{id:int}/return")]
+    public async Task<IActionResult> ReturnLoan(int id)
     {
         var currentUser = await GetCurrentUserAsync();
         if (currentUser == null) return Unauthorized();
@@ -245,21 +228,49 @@ public class LoanController : ControllerBase
         if (loan.LenderId != currentUser.Id)
             return Forbid();
 
-        var allowed = new[] { "offen", "zurückgegeben" };
-        if (!allowed.Contains(dto.Status))
-            return BadRequest(new { message = "Ungültiger Status. Erlaubt: offen, zurückgegeben." });
+        if (loan.Status != "offen")
+            return BadRequest(new { message = "Nur offene Leihen können als zurückgegeben markiert werden." });
 
-        loan.Status = dto.Status;
+        loan.Status = "zurückgegeben";
         try
         {
             await _context.SaveChangesAsync();
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23514")
         {
-            return BadRequest(new { message = $"Dieser Status ist in der Datenbank nicht erlaubt. DB-Constraint: {pg.ConstraintName}" });
+            return BadRequest(new { message = "Dieser Status ist in der Datenbank nicht erlaubt." });
         }
 
         return NoContent();
+    }
+
+    // PUT /api/loan/{id}/extend — Rückgabedatum einer aktiven Leihe nach hinten verschieben
+    // (typische "Verlängern"-Funktion). Nur der Verleiher darf verlängern, nur bei Status "offen",
+    // und nur auf ein Datum nach dem bisherigen Rückgabedatum (sonst wäre es keine Verlängerung).
+    [HttpPut("{id:int}/extend")]
+    public async Task<ActionResult<LoanDetailDto>> ExtendLoan(int id, ExtendLoanDto dto)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+
+        var loan = await _context.Loans.FindAsync(id);
+        if (loan == null) return NotFound();
+
+        if (loan.LenderId != currentUser.Id)
+            return Forbid();
+
+        if (loan.Status != "offen")
+            return BadRequest(new { message = "Nur aktive Leihen können verlängert werden." });
+
+        if (loan.EndDate != null && dto.NewEndDate <= loan.EndDate)
+            return BadRequest(new { message = "Das neue Rückgabedatum muss nach dem bisherigen liegen." });
+
+        loan.EndDate = dto.NewEndDate;
+        await _context.SaveChangesAsync();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var result = await ProjectLoans(_context.Loans.Where(l => l.Id == id), today).FirstAsync();
+        return Ok(result);
     }
 
     // DELETE /api/loan/{id} — Leihe löschen (nur Verleiher)

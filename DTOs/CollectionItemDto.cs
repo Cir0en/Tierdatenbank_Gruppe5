@@ -18,4 +18,13 @@ public class CollectionItemDto
     public string? AgeClass { get; set; }
     public decimal? BodyMassGram { get; set; }
     public decimal? BodyLengthMm { get; set; }
+
+    /// <summary>True, wenn aktuell eine offene Ausleihe für dieses Objekt existiert.</summary>
+    public bool IsOnLoan { get; set; }
+
+    /// <summary>Name des aktuellen Entleihers; nur für Eigentümer/Moderation gefüllt, sonst null.</summary>
+    public string? LoanedToUsername { get; set; }
+
+    /// <summary>Vereinbartes Rückgabedatum der offenen Ausleihe; nur für Eigentümer/Moderation gefüllt, sonst null.</summary>
+    public DateOnly? LoanReturnDate { get; set; }
 }

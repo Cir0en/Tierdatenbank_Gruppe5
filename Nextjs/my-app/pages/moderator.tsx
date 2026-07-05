@@ -15,8 +15,10 @@ const API = 'http://localhost:5099';
 //        2) "Berichte": Kennzahlen-Dashboard (Taxonomie-, Sammlungs- und
 //           Leihe-Statistiken sowie eine Nutzer-Aktivitätstabelle).
 // Rollen: Nur für Rolle "Moderator" oder "Admin" zugänglich — die Rolle wird
-//        aus den Clerk publicMetadata gelesen; andere Nutzer (inkl. Gäste)
-//        werden per Redirect umgeleitet (siehe useEffect weiter unten).
+//        primär aus der Neon-DB gelesen (Clerk publicMetadata dient nur als
+//        Fallback, solange die DB-Rolle noch lädt, siehe admin.tsx); andere
+//        Nutzer (inkl. Gäste) werden per Redirect umgeleitet (siehe useEffect
+//        weiter unten).
 // ═══════════════════════════════════════════════════════════════════════════
 
 type TabId = 'submissions' | 'reports';
@@ -203,18 +205,46 @@ export default function ModeratorPage() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [userActivity, setUserActivity] = useState<UserActivity[]>([]);
 
-  // Rolle wird aus den Clerk publicMetadata gelesen (nicht per Backend-Call);
-  // steht clientseitig sofort zur Verfügung und dient hier nur der Zugriffskontrolle.
-  const currentRole = (user?.publicMetadata?.role as string) ?? '';
+  const [dbRole, setDbRole] = useState<string | null>(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+
+  // Rolle aus Neon-DB holen — Clerk publicMetadata ist nicht zuverlässig
+  // nach einer Admin-Rollenänderung (Clerk-Cache-Problem, siehe admin.tsx).
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const res = await fetch(`${API}/api/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setDbRole(data.role ?? null);
+      } catch {
+        // ignore, roleLoaded wird trotzdem true
+      } finally {
+        if (!cancelled) setRoleLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isSignedIn, getToken]);
+
+  // DB-Rolle hat Vorrang; Fallback auf Clerk publicMetadata, solange die DB-Rolle noch lädt.
+  const currentRole = dbRole ?? (user?.publicMetadata?.role as string) ?? '';
 
   // Zugriffsschutz: nicht eingeloggte Nutzer werden zum Login geschickt,
-  // eingeloggte Nutzer ohne Moderator-/Admin-Rolle zur Startseite.
+  // eingeloggte Nutzer ohne Moderator-/Admin-Rolle zur Startseite. Wartet auf
+  // roleLoaded, damit nicht bereits vor Eintreffen der DB-Rolle fälschlich
+  // anhand veralteter Clerk-Metadaten umgeleitet wird.
   useEffect(() => {
     if (isSignedIn === false) { router.replace('/login'); return; }
-    if (isSignedIn && currentRole && currentRole !== 'Moderator' && currentRole !== 'Admin') {
+    if (isSignedIn && roleLoaded && currentRole && currentRole !== 'Moderator' && currentRole !== 'Admin') {
       router.replace('/');
     }
-  }, [isSignedIn, currentRole, router]);
+  }, [isSignedIn, roleLoaded, currentRole, router]);
 
   // Lädt die Liste ausstehender Taxonomie-Einreichungen (öffentlicher
   // Endpunkt, kein Auth-Header nötig — die Seite selbst ist aber geschützt).
@@ -267,8 +297,12 @@ export default function ModeratorPage() {
     setModal(null);
   };
 
-  // Rendert nichts, solange der Redirect (siehe useEffect oben) noch nicht
-  // gegriffen hat bzw. für Nutzer ohne passende Rolle.
+  // Solange die DB-Rolle noch lädt, weder Inhalt noch (fälschlich) einen
+  // Redirect zeigen — sonst würde eine kurzzeitig veraltete Clerk-Rolle
+  // Moderatoren/Admins direkt nach dem Laden wieder aussperren.
+  if (!roleLoaded) return (
+    <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Laden…</div>
+  );
   if (!isSignedIn || (currentRole !== 'Moderator' && currentRole !== 'Admin')) return null;
 
   const tabs: { id: TabId; label: string; count?: number }[] = [

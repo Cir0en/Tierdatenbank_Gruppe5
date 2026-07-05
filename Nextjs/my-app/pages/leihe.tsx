@@ -11,11 +11,11 @@ const API = "http://localhost:5099";
 // Zweck: Verwaltung aller Leihvorgänge des eingeloggten Nutzers — sowohl als
 //        Verleiher (eigene Objekte, die man verliehen hat) als auch als
 //        Entleiher (Objekte, die man sich von anderen ausgeliehen hat).
-//        Erlaubt Anlegen neuer Ausleihen, Markieren als zurückgegeben/aktiv
-//        sowie Löschen (nur als Verleiher möglich).
-// Rollen: Setzt einen eingeloggten Nutzer voraus; Aktionen (Status ändern,
-//        löschen) sind nur für den Verleiher (isLender) der jeweiligen Leihe
-//        sichtbar, unabhängig von der globalen Nutzerrolle.
+//        Erlaubt Anlegen neuer Ausleihen, Rückgabe, Verlängern des
+//        Rückgabedatums sowie Löschen (jeweils nur als Verleiher möglich).
+// Rollen: Setzt einen eingeloggten Nutzer voraus; Aktionen (zurückgeben,
+//        verlängern, löschen) sind nur für den Verleiher (isLender) der
+//        jeweiligen Leihe sichtbar, unabhängig von der globalen Nutzerrolle.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ type Loan = {
   isOverdue: boolean;
 };
 
-type MyObject = { id: number; name: string | null; collectionName: string | null };
+type MyObject = { id: number; name: string | null; collectionName: string | null; isOnLoan: boolean };
 type LoanUser = { id: number; username: string; firstName: string | null; lastName: string | null; institution: string | null };
 
 type FilterRole = "alle" | "verleiher" | "entleiher";
@@ -60,31 +60,31 @@ function displayName(first: string | null, last: string | null, username: string
 
 // Übersetzt den rohen Backend-Status in den in der UI angezeigten Status.
 // Überfällige Leihen haben Vorrang vor dem gespeicherten Status.
-function effectiveStatus(loan: Loan): string {
+function effectiveStatus(loan: Loan): "aktiv" | "überfällig" | "zurückgegeben" {
   if (loan.isOverdue) return "überfällig";
-  // DB speichert laufende Leihen als 'offen', UI zeigt 'aktiv'
-  if (loan.status === "offen") return "aktiv";
-  return loan.status ?? "—";
+  if (loan.status === "zurückgegeben") return "zurückgegeben";
+  return "aktiv"; // DB speichert laufende Leihen als 'offen', UI zeigt 'aktiv'
 }
 
-// Farbiges Status-Badge für eine einzelne Leihe (grün=aktiv, rot=überfällig,
-// grau=zurückgegeben, gelb=offen als Fallback).
+// Farbiges Status-Badge für eine einzelne Leihe.
 function StatusPill({ loan }: { loan: Loan }) {
   const s = effectiveStatus(loan);
   const cls: Record<string, string> = {
-    aktiv:       "pill pill--green",
-    überfällig:  "pill pill--red",
+    "aktiv": "pill pill--green",
+    "überfällig": "pill pill--red",
     "zurückgegeben": "pill pill--gray",
-    offen:       "pill pill--amber",
   };
-  return <span className={cls[s] ?? "pill pill--gray"}>{s}</span>;
+  return <span className={cls[s]}>{s}</span>;
 }
 
 // ── Modal: Neue Ausleihe ───────────────────────────────────────────────────
 
 // Modal zum Anlegen einer neuen Ausleihe: Nutzer wählt eines seiner eigenen
 // Objekte (`objects`, aus /api/loan/my-objects) sowie einen Entleiher
-// (`users`, aus /api/loan/users) und einen Zeitraum aus.
+// (`users`, aus /api/loan/users) und einen Zeitraum aus. Bereits verliehene
+// Objekte werden in der Auswahl deaktiviert (statt erst beim Absenden mit
+// einem 409-Konflikt zu enden), eine Suche filtert die Objektliste bei vielen
+// Einträgen.
 function CreateLoanModal({
   objects, users, getToken,
   onCreated, onClose,
@@ -95,12 +95,19 @@ function CreateLoanModal({
   onCreated: () => void;
   onClose: () => void;
 }) {
+  const [objectSearch, setObjectSearch] = useState("");
   const [objectId, setObjectId]     = useState<number | "">("");
   const [borrowerId, setBorrowerId] = useState<number | "">("");
   const [startDate, setStartDate]   = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate]       = useState<string>("");
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
+
+  const filteredObjects = objects.filter((o) => {
+    const q = objectSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (o.name ?? "").toLowerCase().includes(q) || (o.collectionName ?? "").toLowerCase().includes(q);
+  });
 
   // Validiert die Pflichtfelder und legt die Ausleihe im Backend an. Auth
   // erfolgt per Bearer-Token (LoanController erfordert [Authorize]), damit
@@ -146,37 +153,52 @@ function CreateLoanModal({
         <form className="modal-body" onSubmit={handleSubmit}>
           {error && <div className="form-error">{error}</div>}
 
-          <label className="form-label">Objekt</label>
-          <select
-            className="form-select"
-            value={objectId}
-            onChange={(e) => setObjectId(Number(e.target.value))}
-            required
-          >
-            <option value="">— Objekt auswählen —</option>
-            {objects.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name ?? `Objekt #${o.id}`}
-                {o.collectionName ? ` (${o.collectionName})` : ""}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label className="form-label">Objekt</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="Objekt suchen…"
+              value={objectSearch}
+              onChange={(e) => setObjectSearch(e.target.value)}
+              style={{ marginBottom: 6 }}
+            />
+            <select
+              className="form-select"
+              value={objectId}
+              onChange={(e) => setObjectId(Number(e.target.value))}
+              required
+              size={Math.min(6, Math.max(4, filteredObjects.length + 1))}
+            >
+              <option value="">— Objekt auswählen —</option>
+              {filteredObjects.map((o) => (
+                <option key={o.id} value={o.id} disabled={o.isOnLoan}>
+                  {o.name ?? `Objekt #${o.id}`}
+                  {o.collectionName ? ` (${o.collectionName})` : ""}
+                  {o.isOnLoan ? " — bereits verliehen" : ""}
+                </option>
+              ))}
+              {filteredObjects.length === 0 && <option disabled>Keine Objekte gefunden</option>}
+            </select>
+          </div>
 
-          <label className="form-label">Entleiher</label>
-          <select
-            className="form-select"
-            value={borrowerId}
-            onChange={(e) => setBorrowerId(Number(e.target.value))}
-            required
-          >
-            <option value="">— Person auswählen —</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {displayName(u.firstName, u.lastName, u.username)}
-                {u.institution ? ` · ${u.institution}` : ""}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label className="form-label">Entleiher</label>
+            <select
+              className="form-select"
+              value={borrowerId}
+              onChange={(e) => setBorrowerId(Number(e.target.value))}
+              required
+            >
+              <option value="">— Person auswählen —</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {displayName(u.firstName, u.lastName, u.username)}
+                  {u.institution ? ` · ${u.institution}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="form-row">
             <div style={{ flex: 1 }}>
@@ -214,20 +236,103 @@ function CreateLoanModal({
   );
 }
 
+// ── Modal: Ausleihe verlängern ─────────────────────────────────────────────
+
+// Modal zum Verlängern des Rückgabedatums einer aktiven Ausleihe. Das neue
+// Datum muss nach dem bisherigen liegen (serverseitig zusätzlich geprüft).
+function ExtendLoanModal({
+  loan, getToken, onExtended, onClose,
+}: {
+  loan: Loan;
+  getToken: () => Promise<string | null>;
+  onExtended: () => void;
+  onClose: () => void;
+}) {
+  const minDate = loan.endDate
+    ? new Date(new Date(loan.endDate).getTime() + 86400000).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  const [newEndDate, setNewEndDate] = useState<string>(minDate);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/loan/${loan.id}/extend`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ newEndDate }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? `Fehler ${res.status}`);
+      }
+      onExtended();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">Ausleihe verlängern</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <form className="modal-body" onSubmit={handleSubmit}>
+          {error && <div className="form-error">{error}</div>}
+          <p style={{ fontSize: 13, color: "#374151" }}>
+            <strong>{loan.objectName ?? `Objekt #${loan.objectId}`}</strong> ist derzeit bis <strong>{fmt(loan.endDate)}</strong> verliehen.
+          </p>
+          <div>
+            <label className="form-label">Neues Rückgabedatum</label>
+            <input
+              className="form-input"
+              type="date"
+              value={newEndDate}
+              min={minDate}
+              onChange={(e) => setNewEndDate(e.target.value)}
+              required
+            />
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn--ghost" onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn btn--primary" disabled={saving}>
+              {saving ? "Wird gespeichert…" : "Verlängern"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 // Hauptkomponente der Leihverwaltungs-Seite: lädt Leihen sowie Hilfsdaten
 // (eigene Objekte, mögliche Entleiher), bietet Filter nach Rolle/Status und
-// Aktionen zum Statuswechsel bzw. Löschen einzelner Leihen an.
+// Aktionen zum Zurückgeben, Verlängern bzw. Löschen einzelner Leihen an.
 export default function LeihePage() {
   const { userId: clerkId, getToken } = useAuth();
 
   const [loans, setLoans]         = useState<Loan[]>([]);
   const [objects, setObjects]     = useState<MyObject[]>([]);
   const [users, setUsers]         = useState<LoanUser[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [extendLoan, setExtendLoan] = useState<Loan | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const [filterRole, setFilterRole]     = useState<FilterRole>("alle");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("alle");
@@ -238,6 +343,26 @@ export default function LeihePage() {
   const authHeaders = async (): Promise<Record<string, string> | undefined> => {
     const token = await getToken();
     return token ? { Authorization: `Bearer ${token}` } : undefined;
+  };
+
+  // Lädt die eigene numerische DB-Id (nicht die Clerk-Id), um pro Leihe zu
+  // bestimmen, ob der aktuelle Nutzer Verleiher oder Entleiher ist — loan.lenderName
+  // ist für jede Leihe gesetzt (jede Leihe hat einen Verleiher), taugt also nicht
+  // als Unterscheidungsmerkmal für die eigene Rolle.
+  const fetchCurrentUser = async () => {
+    if (!clerkId) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/users/me`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (res.ok) {
+        const me = await res.json();
+        setCurrentUserId(me.id ?? null);
+      }
+    } catch {
+      // currentUserId bleibt null; Rollen-Kennzeichnung/Aktionsbuttons werden dann ausgeblendet
+    }
   };
 
   // Lädt alle Leihen, an denen der Nutzer als Verleiher oder Entleiher beteiligt ist.
@@ -275,30 +400,31 @@ export default function LeihePage() {
   useEffect(() => {
     fetchLoans();
     fetchSupportData();
+    fetchCurrentUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clerkId]);
 
-  // Ändert den Status einer Leihe (z. B. "zurückgegeben" oder Reaktivierung
-  // auf "offen"). Nur der Verleiher darf das (serverseitig geprüft); Fehler
-  // werden im actionError-Banner angezeigt. Die Liste wird danach immer neu
-  // geladen, um konsistente isOverdue-Werte vom Server zu bekommen.
-  const handleStatusChange = async (loanId: number, status: string) => {
+  // Markiert eine Leihe als zurückgegeben (nur Verleiher, nur aus Status "offen").
+  const handleReturn = async (loanId: number) => {
     if (!clerkId) return;
     setActionError(null);
+    setBusyId(loanId);
     try {
       const auth = await authHeaders();
-      const res = await fetch(`${API}/api/loan/${loanId}/status`, {
+      const res = await fetch(`${API}/api/loan/${loanId}/return`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...auth },
-        body: JSON.stringify({ status }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setActionError(body.message ?? `Fehler ${res.status} — Status konnte nicht gesetzt werden.`);
+        setActionError(body.message ?? `Fehler ${res.status} — Rückgabe konnte nicht vermerkt werden.`);
       }
     } catch {
-      setActionError("Server nicht erreichbar — Status konnte nicht gesetzt werden.");
+      setActionError("Server nicht erreichbar — Rückgabe konnte nicht vermerkt werden.");
     } finally {
+      setBusyId(null);
       fetchLoans();
+      fetchSupportData();
     }
   };
 
@@ -307,6 +433,7 @@ export default function LeihePage() {
     if (!clerkId) return;
     if (!confirm("Leihe wirklich löschen?")) return;
     setActionError(null);
+    setBusyId(loanId);
     try {
       const res = await fetch(`${API}/api/loan/${loanId}`, {
         method: "DELETE",
@@ -319,7 +446,9 @@ export default function LeihePage() {
     } catch {
       setActionError("Server nicht erreichbar — Leihe konnte nicht gelöscht werden.");
     } finally {
+      setBusyId(null);
       fetchLoans();
+      fetchSupportData();
     }
   };
 
@@ -330,8 +459,8 @@ export default function LeihePage() {
   const filtered = loans.filter((l) => {
     const roleOk =
       filterRole === "alle" ||
-      (filterRole === "verleiher" && l.lenderId != null) ||
-      (filterRole === "entleiher" && l.borrowerId != null);
+      (filterRole === "verleiher" && currentUserId != null && l.lenderId === currentUserId) ||
+      (filterRole === "entleiher" && currentUserId != null && l.borrowerId === currentUserId);
 
     const eff = effectiveStatus(l);
     const statusOk =
@@ -350,189 +479,135 @@ export default function LeihePage() {
 
   return (
     <>
-      {/* Komponenten-Styling (CSS-in-JS) für die gesamte Seite. */}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-          --bg:         #ffffff;
-          --bg-surface: #f8f9fa;
-          --bg-card:    #ffffff;
-          --primary:    #1a73e8;
-          --primary-dim: rgba(26,115,232,0.1);
-          --green:      #4a6e3d;
-          --green-dim:  rgba(74,110,61,0.3);
-          --green-glow: rgba(74,110,61,0.04);
-          --text-hi:    #202124;
-          --text-mid:   #5f6368;
-          --text-lo:    #70757a;
-          --amber:      #f9ab00;
-          --red:        #d93025;
-          --border:     #dadce0;
-          --ff-mono:    'Roboto Mono', monospace;
-          --ff-serif:   'Cormorant Garamond', serif;
-          --sidebar-w:  240px;
-          --top-h:      64px;
-        }
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap');
+        html, body { height: 100%; background: #f8f9fa; font-family: 'Inter', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
 
-        html, body { height: 100%; background: var(--bg); color: var(--text-hi); font-family: var(--ff-mono); font-size: 13px; overflow: hidden; }
+        .app-shell { display: flex; height: 100vh; overflow: hidden; }
+        .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
-        .bg-glow { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
-        .bg-glow::before { content: ''; position: absolute; top: -20%; left: -10%; width: 60%; height: 60%; background: radial-gradient(ellipse, rgba(74,110,61,0.09) 0%, transparent 70%); animation: driftA 22s ease-in-out infinite alternate; }
-        .bg-glow::after { content: ''; position: absolute; bottom: -20%; right: -10%; width: 50%; height: 50%; background: radial-gradient(ellipse, rgba(100,70,30,0.07) 0%, transparent 70%); animation: driftB 28s ease-in-out infinite alternate; }
-        @keyframes driftA { from { transform: translate(0,0); } to { transform: translate(3%,2%); } }
-        @keyframes driftB { from { transform: translate(0,0); } to { transform: translate(-2%,-3%); } }
-        .grid-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 0; background-image: linear-gradient(rgba(74,110,61,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(74,110,61,0.035) 1px, transparent 1px); background-size: 48px 48px; }
-
-        .app { position: relative; z-index: 10; display: flex; height: 100vh; overflow: hidden; }
-        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-
-        /* Topbar */
-        .topbar { height: var(--top-h); display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
-        .topbar-title { font-family: var(--ff-serif); font-size: 18px; font-weight: 300; color: var(--text-hi); letter-spacing: 0.02em; }
-        .topbar-title em { font-style: italic; color: var(--text-mid); }
+        .topbar { height: 56px; display: flex; align-items: center; padding: 0 24px; background: #fff; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; gap: 12px; }
+        .topbar-title { font-size: 16px; font-weight: 700; color: #111827; }
         .topbar-spacer { flex: 1; }
 
-        /* Content */
-        .content { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+        .content { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 18px; }
 
-        /* Stat grid */
-        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-        .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 2px; padding: 14px 16px; position: relative; overflow: hidden; }
-        .stat-card::before { content: ''; position: absolute; top: -1px; left: -1px; width: 14px; height: 14px; border-top: 1.5px solid var(--green-dim); border-left: 1.5px solid var(--green-dim); }
-        .stat-value { display: block; font-family: var(--ff-serif); font-size: 32px; font-weight: 300; color: var(--text-hi); line-height: 1; margin-bottom: 4px; }
-        .stat-label { display: block; font-size: 10px; letter-spacing: 0.12em; color: var(--text-mid); text-transform: uppercase; }
-        .stat-sub { display: block; font-size: 9px; color: var(--text-lo); margin-top: 3px; }
+        /* Stats */
+        .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+        .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px; }
+        .stat-value { font-size: 26px; font-weight: 700; color: #111827; line-height: 1; }
+        .stat-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
 
         /* Filter bar */
         .filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-        .filter-group { display: flex; gap: 4px; }
-        .filter-btn { background: none; border: 1px solid var(--border); border-radius: 2px; padding: 5px 12px; font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
-        .filter-btn:hover { border-color: var(--green-dim); color: var(--text-hi); }
-        .filter-btn.active { background: rgba(74,110,61,0.1); border-color: var(--green-dim); color: var(--green); }
-        .filter-sep { width: 1px; background: var(--border); margin: 0 4px; }
+        .filter-group { display: flex; gap: 6px; }
+        .filter-btn { background: #fff; border: 1px solid #e5e7eb; border-radius: 999px; padding: 6px 14px; font-size: 12px; color: #6b7280; cursor: pointer; transition: all .15s; font-family: inherit; }
+        .filter-btn:hover { border-color: #6ee7b7; color: #111827; }
+        .filter-btn.active { background: #f0fdf4; border-color: #059669; color: #065f46; font-weight: 600; }
         .filter-spacer { flex: 1; }
 
         /* Card + Table */
-        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
-        .card-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-        .card-title { font-size: 10px; letter-spacing: 0.15em; color: var(--text-mid); text-transform: uppercase; }
-        .card-count { font-size: 10px; color: var(--text-lo); }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+        .card-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #f3f4f6; }
+        .card-title { font-size: 13px; font-weight: 700; color: #111827; }
+        .card-count { font-size: 12px; color: #9ca3af; }
 
         .tbl { width: 100%; border-collapse: collapse; }
-        .tbl th { text-align: left; padding: 8px 12px; font-size: 9px; letter-spacing: 0.12em; color: var(--text-lo); text-transform: uppercase; border-bottom: 1px solid var(--border); font-weight: 400; }
-        .tbl td { padding: 9px 12px; font-size: 11px; color: var(--text-mid); border-bottom: 1px solid rgba(74,110,61,0.07); vertical-align: middle; }
-        .tbl tr:hover td { background: var(--green-glow); }
+        .tbl th { text-align: left; padding: 10px 16px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #f3f4f6; background: #fafafa; }
+        .tbl td { padding: 11px 16px; font-size: 13px; color: #374151; border-bottom: 1px solid #f9fafb; vertical-align: middle; }
         .tbl tr:last-child td { border-bottom: none; }
-        .td-name { color: var(--text-hi); font-style: italic; }
-        .td-id { color: var(--text-lo); font-size: 10px; }
-        .td-actions { display: flex; gap: 6px; align-items: center; }
-        .tbl-btn { font-size: 9px; letter-spacing: 0.06em; background: none; border: 1px solid var(--border); border-radius: 2px; padding: 3px 8px; color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono); transition: all 0.15s; white-space: nowrap; }
-        .tbl-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
-        .tbl-btn--danger:hover { border-color: rgba(180,60,60,0.4); color: var(--red); }
+        .tbl tr:hover td { background: #f9fafb; }
+        .td-name { color: #111827; font-weight: 500; }
+        .td-id { color: #9ca3af; font-size: 11px; }
+        .td-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+        .tbl-btn { font-size: 11px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 5px 10px; color: #374151; cursor: pointer; font-family: inherit; transition: all .15s; white-space: nowrap; }
+        .tbl-btn:hover { border-color: #6ee7b7; background: #f0fdf4; }
+        .tbl-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .tbl-btn--danger { color: #dc2626; border-color: #fecaca; }
+        .tbl-btn--danger:hover { background: #fef2f2; border-color: #fca5a5; }
 
         /* Pills */
-        .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; letter-spacing: 0.1em; padding: 2px 7px; border-radius: 2px; text-transform: uppercase; white-space: nowrap; }
-        .pill::before { content: ''; width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0; }
-        .pill--green  { background: rgba(74,110,61,0.12); color: rgba(120,180,90,0.85); }
-        .pill--green::before  { background: rgba(100,180,80,0.7); }
-        .pill--amber  { background: rgba(180,130,40,0.12); color: var(--amber); }
-        .pill--amber::before  { background: var(--amber); }
-        .pill--red    { background: rgba(180,60,60,0.12); color: var(--red); }
-        .pill--red::before    { background: var(--red); }
-        .pill--gray   { background: rgba(100,100,100,0.1); color: rgba(140,140,140,0.6); }
-        .pill--gray::before   { background: rgba(140,140,140,0.4); }
+        .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+        .pill--green { background: #d1fae5; color: #065f46; }
+        .pill--red   { background: #fee2e2; color: #991b1b; }
+        .pill--gray  { background: #f3f4f6; color: #6b7280; }
 
-        .role-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; padding: 2px 6px; border-radius: 2px; letter-spacing: 0.06em; }
-        .role-chip--lender  { background: rgba(26,115,232,0.1); color: var(--primary); }
-        .role-chip--borrower { background: rgba(74,110,61,0.1); color: var(--green); }
+        .role-chip { display: inline-flex; align-items: center; font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600; margin-left: 6px; }
+        .role-chip--lender   { background: #dbeafe; color: #1e40af; }
+        .role-chip--borrower { background: #d1fae5; color: #065f46; }
 
         /* Empty state */
-        .empty { padding: 40px; text-align: center; color: var(--text-lo); font-size: 12px; letter-spacing: 0.1em; }
+        .empty { padding: 40px; text-align: center; color: #9ca3af; font-size: 13px; }
 
         /* Buttons */
-        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 2px; font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.08em; cursor: pointer; border: none; transition: all 0.15s; }
-        .btn--primary { background: var(--primary); color: #fff; }
-        .btn--primary:hover { background: #1557b0; }
-        .btn--primary:disabled { opacity: 0.6; cursor: not-allowed; }
-        .btn--ghost { background: none; border: 1px solid var(--border); color: var(--text-mid); }
-        .btn--ghost:hover { border-color: var(--green-dim); }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; }
+        .btn--primary { background: #059669; color: #fff; }
+        .btn--primary:hover { background: #047857; }
+        .btn--primary:disabled { opacity: .6; cursor: not-allowed; }
+        .btn--ghost { background: #fff; border: 1px solid #e5e7eb; color: #374151; }
+        .btn--ghost:hover { border-color: #6ee7b7; }
 
         /* Modal */
-        .modal-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; }
-        .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; width: 480px; max-width: 95vw; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
-        .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
-        .modal-title { font-size: 12px; letter-spacing: 0.12em; color: var(--text-hi); text-transform: uppercase; }
-        .modal-close { background: none; border: none; font-size: 14px; color: var(--text-lo); cursor: pointer; padding: 2px 6px; border-radius: 2px; }
-        .modal-close:hover { color: var(--text-hi); background: var(--bg-surface); }
-        .modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-        .modal-footer { display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; }
+        .modal-backdrop { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .modal { background: #fff; border-radius: 12px; width: 460px; max-width: 100%; box-shadow: 0 12px 40px rgba(0,0,0,.2); }
+        .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #f3f4f6; }
+        .modal-title { font-size: 14px; font-weight: 700; color: #111827; }
+        .modal-close { background: none; border: none; font-size: 16px; color: #9ca3af; cursor: pointer; }
+        .modal-close:hover { color: #111827; }
+        .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+        .modal-footer { display: flex; gap: 10px; justify-content: flex-end; padding-top: 4px; }
 
         /* Form */
-        .form-label { font-size: 10px; letter-spacing: 0.1em; color: var(--text-mid); text-transform: uppercase; display: block; margin-bottom: 5px; }
+        .form-label { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 5px; }
         .form-select, .form-input {
-          width: 100%; padding: 7px 10px; background: var(--bg-surface);
-          border: 1px solid var(--border); border-radius: 2px;
-          font-family: var(--ff-mono); font-size: 12px; color: var(--text-hi);
-          outline: none; transition: border-color 0.15s;
+          width: 100%; padding: 8px 10px; background: #fff;
+          border: 1px solid #e5e7eb; border-radius: 8px;
+          font-family: inherit; font-size: 13px; color: #111827;
+          outline: none; transition: border-color .15s;
         }
-        .form-select:focus, .form-input:focus { border-color: var(--primary); }
+        .form-select:focus, .form-input:focus { border-color: #059669; }
         .form-row { display: flex; gap: 12px; }
-        .form-error { background: rgba(180,60,60,0.08); border: 1px solid rgba(180,60,60,0.3); border-radius: 2px; padding: 8px 12px; font-size: 11px; color: var(--red); }
+        .form-error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #b91c1c; }
 
-        /* Scrollbar */
+        /* Error banner */
+        .error-banner { padding: 10px 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; font-size: 12px; display: flex; align-items: center; justify-content: space-between; }
+
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
-
-        /* Status bar */
-        .statusbar { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-top: 1px solid var(--border); background: rgba(12,15,10,0.9); flex-shrink: 0; font-size: 10px; letter-spacing: 0.1em; color: var(--text-lo); }
-        .status-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: rgba(74,110,61,0.7); margin-right: 6px; animation: pulse 2.5s ease infinite; vertical-align: middle; }
-        @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; box-shadow: 0 0 5px rgba(74,110,61,0.5); } }
-
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .card { animation: fadeUp 0.4s ease both; }
+        ::-webkit-scrollbar-thumb { background: #d1fae5; border-radius: 2px; }
       `}</style>
 
-      <div className="bg-glow" />
-      <div className="grid-overlay" />
-
-      <div className="app">
+      <div className="app-shell">
         <Navbar activeNav="leihe" />
 
-        <div className="main">
-          {/* Topbar */}
+        <div className="main-area">
           <header className="topbar">
-            <h1 className="topbar-title">Ausleihe <em>/ Leihverwaltung</em></h1>
+            <span className="topbar-title">Ausleihe</span>
             <div className="topbar-spacer" />
             <button className="btn btn--primary" onClick={() => setShowModal(true)}>
-              ＋ Neue Ausleihe
+              + Neue Ausleihe
             </button>
           </header>
 
           <main className="content">
 
             {/* Stats */}
-            <div className="stat-grid">
+            <div className="stat-row">
               <div className="stat-card">
-                <span className="stat-value">{loans.length}</span>
-                <span className="stat-label">Leihen gesamt</span>
-                <span className="stat-sub">alle Zeiträume</span>
+                <div className="stat-value">{loans.length}</div>
+                <div className="stat-label">Leihen gesamt</div>
               </div>
               <div className="stat-card">
-                <span className="stat-value">{activeCount}</span>
-                <span className="stat-label">Aktiv</span>
-                <span className="stat-sub">laufende Ausleihen</span>
+                <div className="stat-value">{activeCount}</div>
+                <div className="stat-label">Aktiv</div>
               </div>
               <div className="stat-card">
-                <span className="stat-value" style={{ color: overdueCount > 0 ? "var(--red)" : undefined }}>{overdueCount}</span>
-                <span className="stat-label">Überfällig</span>
-                <span className="stat-sub">Rückgabe ausstehend</span>
+                <div className="stat-value" style={{ color: overdueCount > 0 ? "#dc2626" : undefined }}>{overdueCount}</div>
+                <div className="stat-label">Überfällig</div>
               </div>
               <div className="stat-card">
-                <span className="stat-value">{returnedCount}</span>
-                <span className="stat-label">Zurückgegeben</span>
-                <span className="stat-sub">abgeschlossen</span>
+                <div className="stat-value">{returnedCount}</div>
+                <div className="stat-label">Zurückgegeben</div>
               </div>
             </div>
 
@@ -549,7 +624,6 @@ export default function LeihePage() {
                   </button>
                 ))}
               </div>
-              <div className="filter-sep" />
               <div className="filter-group">
                 {(["alle", "aktiv", "ueberfaellig", "zurueck"] as FilterStatus[]).map((s) => (
                   <button
@@ -563,13 +637,13 @@ export default function LeihePage() {
               </div>
             </div>
 
-            {/* Table */}
             {actionError && (
-              <div style={{ background: "rgba(180,60,60,0.08)", border: "1px solid rgba(180,60,60,0.3)", borderRadius: 2, padding: "10px 14px", fontSize: 11, color: "var(--red)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>⚠ {actionError}</span>
-                <button onClick={() => setActionError(null)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 13 }}>✕</button>
+              <div className="error-banner">
+                <span>{actionError}</span>
+                <button onClick={() => setActionError(null)} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer" }}>✕</button>
               </div>
             )}
+
             <div className="card">
               <div className="card-head">
                 <span className="card-title">Leihvorgänge</span>
@@ -594,52 +668,59 @@ export default function LeihePage() {
                   </thead>
                   <tbody>
                     {filtered.map((loan) => {
-                      const isLender = loan.lenderName != null;
+                      // Eigene Rolle in dieser konkreten Leihe: Vergleich gegen die eigene
+                      // numerische DB-Id, nicht gegen die (immer gesetzten) Namensfelder.
+                      const isLender = currentUserId != null && loan.lenderId === currentUserId;
+                      const isBorrower = currentUserId != null && loan.borrowerId === currentUserId;
                       return (
                         <tr key={loan.id}>
                           <td><span className="td-id">LEI-{String(loan.id).padStart(3, "0")}</span></td>
                           <td><span className="td-name">{loan.objectName ?? `Objekt #${loan.objectId}`}</span></td>
                           <td>
                             {displayName(loan.lenderFirstName, loan.lenderLastName, loan.lenderName)}
-                            {isLender && <span className="role-chip role-chip--lender" style={{ marginLeft: 6 }}>Ich</span>}
+                            {isLender && <span className="role-chip role-chip--lender">Ich</span>}
                           </td>
                           <td>
                             {displayName(loan.borrowerFirstName, loan.borrowerLastName, loan.borrowerName)}
-                            {!isLender && <span className="role-chip role-chip--borrower" style={{ marginLeft: 6 }}>Ich</span>}
+                            {isBorrower && <span className="role-chip role-chip--borrower">Ich</span>}
                           </td>
-                          <td style={{ whiteSpace: "nowrap", fontSize: 10 }}>
+                          <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>
                             {fmt(loan.startDate)} → {fmt(loan.endDate)}
                           </td>
                           <td><StatusPill loan={loan} /></td>
                           <td>
                             <div className="td-actions">
                               {isLender && loan.status === "offen" && (
-                                <button
-                                  className="tbl-btn"
-                                  onClick={() => handleStatusChange(loan.id, "zurückgegeben")}
-                                  title="Als zurückgegeben markieren"
-                                >
-                                  ✓ Zurück
-                                </button>
-                              )}
-                              {isLender && loan.status === "zurückgegeben" && (
-                                <button
-                                  className="tbl-btn"
-                                  onClick={() => handleStatusChange(loan.id, "offen")}
-                                  title="Als aktiv markieren"
-                                >
-                                  ↩ Reaktivieren
-                                </button>
+                                <>
+                                  <button
+                                    className="tbl-btn"
+                                    disabled={busyId === loan.id}
+                                    onClick={() => handleReturn(loan.id)}
+                                    title="Als zurückgegeben markieren"
+                                  >
+                                    Zurückgeben
+                                  </button>
+                                  <button
+                                    className="tbl-btn"
+                                    disabled={busyId === loan.id}
+                                    onClick={() => setExtendLoan(loan)}
+                                    title="Rückgabedatum verlängern"
+                                  >
+                                    Verlängern
+                                  </button>
+                                </>
                               )}
                               {isLender && (
                                 <button
                                   className="tbl-btn tbl-btn--danger"
+                                  disabled={busyId === loan.id}
                                   onClick={() => handleDelete(loan.id)}
                                   title="Leihe löschen"
                                 >
-                                  ✕
+                                  Löschen
                                 </button>
                               )}
+                              {!isLender && <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
                             </div>
                           </td>
                         </tr>
@@ -650,12 +731,6 @@ export default function LeihePage() {
               )}
             </div>
           </main>
-
-          <footer className="statusbar">
-            <span><span className="status-dot" />System online</span>
-            <span>Collectio Zoologica · Leihverwaltung</span>
-            <span>TLS 1.3 · Verschlüsselt</span>
-          </footer>
         </div>
       </div>
 
@@ -664,8 +739,17 @@ export default function LeihePage() {
           objects={objects}
           users={users}
           getToken={getToken}
-          onCreated={() => { setShowModal(false); fetchLoans(); }}
+          onCreated={() => { setShowModal(false); fetchLoans(); fetchSupportData(); }}
           onClose={() => setShowModal(false)}
+        />
+      )}
+
+      {extendLoan && (
+        <ExtendLoanModal
+          loan={extendLoan}
+          getToken={getToken}
+          onExtended={() => { setExtendLoan(null); fetchLoans(); }}
+          onClose={() => setExtendLoan(null)}
         />
       )}
     </>

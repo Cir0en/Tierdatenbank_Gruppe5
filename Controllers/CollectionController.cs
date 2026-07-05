@@ -108,6 +108,17 @@ namespace TodoApi.Controllers
                         AgeClass     = item.AgeClass,
                         BodyMassGram = item.BodyMassGram,
                         BodyLengthMm = item.BodyLengthMm,
+                        // Ausleihstatus: öffentlich sichtbar, dass ein Objekt verliehen ist,
+                        // aber an wen/bis wann nur für Eigentümer bzw. Moderation (Persönlichkeitsschutz des Entleihers).
+                        IsOnLoan = item.Loans.Any(l => l.Status == "offen"),
+                        LoanedToUsername = (currentUser != null && (c.UserId == currentUser.Id || canModerate))
+                            ? item.Loans.Where(l => l.Status == "offen")
+                                .Select(l => l.Borrower != null ? l.Borrower.Username : null)
+                                .FirstOrDefault()
+                            : null,
+                        LoanReturnDate = (currentUser != null && (c.UserId == currentUser.Id || canModerate))
+                            ? item.Loans.Where(l => l.Status == "offen").Select(l => l.EndDate).FirstOrDefault()
+                            : null,
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();

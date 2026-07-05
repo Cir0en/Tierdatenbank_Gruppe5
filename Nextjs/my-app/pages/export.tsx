@@ -284,7 +284,7 @@ export default function EinstellungenPage() {
 
         <div className="main-area">
           <header className="topbar">
-            <span className="topbar-title">Einstellungen</span>
+            <span className="topbar-title">{s.title}</span>
           </header>
 
           <main className="content">
@@ -328,14 +328,14 @@ export default function EinstellungenPage() {
 
               {/* Export */}
               <div className="card">
-                <div className="card-head">📤 Export</div>
+                <div className="card-head">📤 {s.exportTitle}</div>
                 <div className="card-body">
                   <p className="export-desc">
-                    Exportiere alle Sammlungsobjekte als CSV-Datei. Die Datei enthält Name, Status, Taxonomie, Fundort, Maße und weitere Felder.
+                    {s.exportDesc}
                   </p>
                   <div className="export-row">
                     <button className="btn-export" onClick={handleCsvDownload} disabled={exporting}>
-                      {exporting ? '⏳ Wird erstellt…' : '⬇ CSV herunterladen'}
+                      {exporting ? s.exportBtnBusy : s.exportBtn}
                     </button>
                   </div>
                 </div>
@@ -344,10 +344,10 @@ export default function EinstellungenPage() {
               {/* Import (nur Moderator/Admin) */}
               {canImport && (
                 <div className="card">
-                  <div className="card-head">📥 Import</div>
+                  <div className="card-head">📥 {s.importTitle}</div>
                   <div className="card-body">
                     <p className="export-desc">
-                      Importiere Fundobjekte aus einer CSV-Datei (gleiches Spaltenformat wie der Export). Taxonomie, Sammlung und Fundort werden anhand des Namens wiederverwendet oder neu angelegt.
+                      {s.importDesc}
                     </p>
                     <div className="export-row">
                       <button
@@ -355,7 +355,7 @@ export default function EinstellungenPage() {
                         onClick={() => fileInputRef.current?.click()}
                         disabled={importing}
                       >
-                        {importing ? '⏳ Wird importiert…' : '⬆ CSV importieren'}
+                        {importing ? s.importBtnBusy : s.importBtn}
                       </button>
                       <input
                         ref={fileInputRef}

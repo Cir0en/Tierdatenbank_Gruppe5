@@ -49,6 +49,22 @@ interface CollectionItem {
   ageClass: string | null;
   bodyMassGram: number | null;
   bodyLengthMm: number | null;
+  isOnLoan: boolean;
+  loanedToUsername: string | null;
+  loanReturnDate: string | null;
+}
+
+interface BorrowedItem {
+  id: number;
+  objectId: number | null;
+  objectName: string | null;
+  lenderName: string | null;
+  lenderFirstName: string | null;
+  lenderLastName: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  status: string | null;
+  isOverdue: boolean;
 }
 
 const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
@@ -750,14 +766,28 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                     </span>
                   )}
 
+                  {item.isOnLoan && (
+                    <span className="animal-card-badge animal-card-badge--loan">
+                      ⇄ Verliehen
+                      {item.loanedToUsername ? ` an ${item.loanedToUsername}` : ''}
+                      {item.loanReturnDate ? ` bis ${new Date(item.loanReturnDate).toLocaleDateString('de-DE')}` : ''}
+                    </span>
+                  )}
+
                   {detail.isOwner && clerkUserId && (
-                    <button
-                      className="btn-loan-animal"
-                      onClick={e => { e.stopPropagation(); setLoanItem(item); setLoanSuccess(null); }}
-                      title="Dieses Tier ausleihen"
-                    >
-                      ⇄ Ausleihen
-                    </button>
+                    item.isOnLoan ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Dieses Tier ist bereits verliehen">
+                        Bereits verliehen
+                      </div>
+                    ) : (
+                      <button
+                        className="btn-loan-animal"
+                        onClick={e => { e.stopPropagation(); setLoanItem(item); setLoanSuccess(null); }}
+                        title="Dieses Tier ausleihen"
+                      >
+                        ⇄ Ausleihen
+                      </button>
+                    )
                   )}
                 </div>
               </div>
@@ -782,6 +812,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           onSaved={() => {
             setLoanItem(null);
             setLoanSuccess(`„${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde erfolgreich ausgeliehen.`);
+            onAnimalAdded(); // lädt die Sammlung neu, damit der "Verliehen"-Badge sofort sichtbar wird
           }}
         />
       )}
@@ -792,7 +823,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
-type Tab = 'public' | 'mine';
+type Tab = 'public' | 'mine' | 'borrowed';
 
 // Hauptkomponente der Seite /Sammlung. Verwaltet sowohl die Grid-Übersicht
 // (mit Tabs "Öffentlich" / "Meine Sammlungen" und Volltextsuche über den Namen)
@@ -819,6 +850,51 @@ export default function SammlungPage() {
   // Detail view
   const [detail, setDetail]           = useState<CollectionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Tiere, die sich der aktuelle Nutzer von anderen ausgeliehen hat (Entleiher-Sicht,
+  // Tab "Geliehen"). Geladen über den bestehenden LoanController, da geliehene Tiere
+  // fachlich weiterhin zur Sammlung des Verleihers gehören und nicht Teil einer
+  // eigenen Collection des Entleihers sind.
+  const [borrowedItems, setBorrowedItems]   = useState<BorrowedItem[]>([]);
+  const [borrowedLoading, setBorrowedLoading] = useState(false);
+
+  const loadBorrowed = useCallback(async () => {
+    if (!isSignedIn) { setBorrowedItems([]); return; }
+    setBorrowedLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) { setBorrowedItems([]); return; }
+      const authHeaders = { Authorization: `Bearer ${token}` };
+      const meRes = await fetch('http://localhost:5099/api/users/me', { headers: authHeaders });
+      if (!meRes.ok) { setBorrowedItems([]); return; }
+      const me = await meRes.json();
+      const loansRes = await fetch('http://localhost:5099/api/loan', { headers: authHeaders });
+      if (!loansRes.ok) { setBorrowedItems([]); return; }
+      const allLoans: any[] = await loansRes.json();
+      setBorrowedItems(
+        allLoans
+          .filter(l => l.borrowerId === me.id && l.status === 'offen')
+          .map(l => ({
+            id: l.id,
+            objectId: l.objectId,
+            objectName: l.objectName,
+            lenderName: l.lenderName,
+            lenderFirstName: l.lenderFirstName,
+            lenderLastName: l.lenderLastName,
+            startDate: l.startDate,
+            endDate: l.endDate,
+            status: l.status,
+            isOverdue: l.isOverdue,
+          }))
+      );
+    } catch {
+      setBorrowedItems([]);
+    } finally {
+      setBorrowedLoading(false);
+    }
+  }, [isSignedIn, getToken]);
+
+  useEffect(() => { loadBorrowed(); }, [loadBorrowed]);
 
   // Lädt die Liste aller für den Nutzer sichtbaren Sammlungen (öffentliche +
   // eigene private). Als useCallback gewrapped, damit die Referenz nur bei
@@ -1070,6 +1146,16 @@ export default function SammlungPage() {
           font-family: inherit; transition: all .15s;
         }
         .btn-loan-animal:hover { background: #f0fdf4; border-color: #2d6a4f; }
+        .btn-loan-animal--disabled {
+          text-align: center; color: #9ca3af; border-color: #e5e7eb; cursor: not-allowed;
+        }
+        .btn-loan-animal--disabled:hover { background: none; border-color: #e5e7eb; }
+
+        .animal-card-badge--loan { background: #fee2e2; color: #991b1b; margin-left: 6px; }
+
+        /* ── Geliehene Tiere (Entleiher-Sicht) ── */
+        .borrowed-item-row .item-status { background: #fef3c7; color: #92400e; }
+        .borrowed-item-row .item-status--overdue { background: #fee2e2; color: #991b1b; }
 
         /* ── Animal card grid (detail view) ── */
         .animal-card-grid {
@@ -1234,10 +1320,43 @@ export default function SammlungPage() {
                 <button className={`tab-btn${tab === 'mine' ? ' tab-active' : ''}`} onClick={() => setTab('mine')}>
                   👤 Meine Sammlungen <span className="tab-count">{mineCols.length}</span>
                 </button>
+                {isSignedIn && (
+                  <button className={`tab-btn${tab === 'borrowed' ? ' tab-active' : ''}`} onClick={() => setTab('borrowed')}>
+                    📥 Geliehen <span className="tab-count">{borrowedItems.length}</span>
+                  </button>
+                )}
               </div>
 
-              {loading && <div className="status-msg">Sammlungen werden geladen…</div>}
-              {error   && <div className="error-box">⚠️ {error}</div>}
+              {loading && tab !== 'borrowed' && <div className="status-msg">Sammlungen werden geladen…</div>}
+              {error   && tab !== 'borrowed' && <div className="error-box">⚠️ {error}</div>}
+
+              {tab === 'borrowed' && (
+                borrowedLoading ? (
+                  <div className="status-msg">Geliehene Tiere werden geladen…</div>
+                ) : borrowedItems.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-icon">📥</div>
+                    Du hast dir aktuell keine Tiere von anderen Nutzern ausgeliehen.
+                  </div>
+                ) : (
+                  <div className="item-list">
+                    {borrowedItems.map(b => (
+                      <div key={b.id} className="item-row borrowed-item-row">
+                        <div className="item-row-left">
+                          <span className="item-name">{b.objectName ?? `Eintrag #${b.objectId}`}</span>
+                          <span className="item-date">
+                            von {[b.lenderFirstName, b.lenderLastName].filter(Boolean).join(' ') || b.lenderName || '—'}
+                            {' · '}bis {b.endDate ? new Date(b.endDate).toLocaleDateString('de-DE') : '—'}
+                          </span>
+                        </div>
+                        <span className={`item-status${b.isOverdue ? ' item-status--overdue' : ''}`}>
+                          {b.isOverdue ? 'überfällig' : 'aktiv'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
 
               {!loading && !error && (
                 <>

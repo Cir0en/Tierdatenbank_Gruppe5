@@ -517,7 +517,6 @@ export default function AdminPage() {
                     </thead>
                     <tbody>
                       {users.map(u => (
-                        <>
                           <tr key={u.id} className={deleteConfirm === u.id ? 'confirm-row' : ''}>
                             <td>
                               <div className="user-info">
@@ -570,7 +569,6 @@ export default function AdminPage() {
                               )}
                             </td>
                           </tr>
-                        </>
                       ))}
                     </tbody>
                   </table>
