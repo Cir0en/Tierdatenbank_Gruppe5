@@ -7,6 +7,11 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace TodoApi.Controllers
 {
+    /// <summary>
+    /// Verwaltet geografische Fundorte (GeoLocations), die hierarchisch (ParentId) organisiert sind,
+    /// z.B. Kontinent -> Land -> Region. Wird u.a. für die Kartenansicht (map-items) und die
+    /// Fundort-Auswahl beim Anlegen von Fundobjekten genutzt.
+    /// </summary>
     [ApiController]
     [Route("api/geolocations")]
     public class GeoLocationsController : ControllerBase
@@ -18,6 +23,8 @@ namespace TodoApi.Controllers
             _context = context;
         }
 
+        // GET /api/geolocations — durchsuchbare/filterbare Liste aller Fundorte
+        // (Suche nach Name, Filter nach übergeordnetem Ort und/oder Typ)
         [HttpGet]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<GeoLocationDto>>> GetGeoLocations(
@@ -68,6 +75,7 @@ namespace TodoApi.Controllers
 
         }
 
+        // GET /api/geolocations/{id} — Detailansicht eines einzelnen Fundorts
         [HttpGet("{id}")]
         public async Task<ActionResult<GeoLocation>> GetGeoLocation(int id)
         {
@@ -90,6 +98,8 @@ namespace TodoApi.Controllers
             return Ok(location);
         }
 
+        // GET /api/geolocations/{id}/children — liefert die direkten Unterorte eines Fundorts
+        // (für hierarchisches Aufklappen, z.B. Land -> Regionen)
         [HttpGet("{id}/children")]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<GeoLocationDto>>> GetChildren(int id)
@@ -124,6 +134,8 @@ namespace TodoApi.Controllers
         }
 
 
+        // POST /api/geolocations — legt einen neuen Fundort an (erfordert Anmeldung).
+        // Validiert Koordinatenbereiche, Existenz des übergeordneten Orts sowie Eindeutigkeit der ExternalId.
         [HttpPost]
         [Authorize]
         public async Task<ActionResult<GeoLocationDto>> CreateGeoLocation(CreateGeoLocationDto dto)
@@ -194,6 +206,9 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetGeoLocation), new { id = location.Id }, result);
         }
 
+        // GET /api/geolocations/map-items — liefert Fundobjekte mit Koordinaten für die Kartenansicht,
+        // optional begrenzt auf einen sichtbaren Kartenausschnitt (Bounding Box aus west/south/east/north).
+        // Nicht angemeldete Nutzer sehen nur Objekte ohne Sammlungszuordnung oder aus öffentlichen Sammlungen.
         [HttpGet("map-items")]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<GeoMapItemDto>>> GetMapItems(
@@ -202,13 +217,23 @@ namespace TodoApi.Controllers
             [FromQuery] decimal? east,
             [FromQuery] decimal? north)
         {
-            // Alle Tiere mit gültigen Koordinaten anzeigen, unabhängig von der Sammlung
+            var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
+            var isAuthenticated = !string.IsNullOrWhiteSpace(clerkId);
+
             var query = _context.CollectItems
                 .AsNoTracking()
                 .Where(i =>
                     i.FindingLocation != null &&
                     i.FindingLocation.Latitude != null &&
                     i.FindingLocation.Longitude != null);
+
+            // Nicht eingeloggte Nutzer sehen nur Einträge ohne Sammlung oder aus öffentlichen Sammlungen
+            if (!isAuthenticated)
+            {
+                query = query.Where(i =>
+                    i.CollectionId == null ||
+                    i.Collection!.IsPublic == true);
+            }
 
             if (west.HasValue && south.HasValue && east.HasValue && north.HasValue)
             {

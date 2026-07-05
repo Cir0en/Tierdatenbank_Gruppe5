@@ -2,35 +2,42 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useClerk } from "@clerk/nextjs";
+import { useClerk, useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/router";
-import testdata from '../data/tierdaten.json';
 import { formatDate } from "../utils/date";
 import Navbar from "../components/Navbar";
 import { Map, MapStyle, config, Marker } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 
+const API = "http://localhost:5099";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Seite: /dashboard
+// Zweck: Alternative/ältere Variante des Übersichts-Dashboards (siehe auch
+//        pages/index.tsx, das dieselbe Funktion für Gäste + eingeloggte
+//        Nutzer übernimmt). Zeigt Kennzahlen, zuletzt erfasste Objekte,
+//        aktive Leihen (live aus dem Backend statt Mock-Daten), eine
+//        Mini-Kartenvorschau und ein rollenbasiertes Benachrichtigungs-Panel.
+// Rollen: Setzt einen eingeloggten Nutzer voraus (kein Gast-Modus wie bei
+//        index.tsx); Inhalte variieren je nach Rolle (Nutzer/Moderator/Admin).
+// ═══════════════════════════════════════════════════════════════════════════
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
   datum?: string; findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
-}; 
-type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
-
-// Testtiere zur Darstellung
-/*
-const MOCK_SPECIMENS: Specimen[] = [
-  { id: "OBJ-001", name: "Papilio machaon",   taxon: "Lepidoptera",  fundort: "Bayern, DE",    datum: "2026-04-12", sammlung: "Schmetterlings-Kollektion", status: "freigegeben" },
-  { id: "OBJ-002", name: "Carabus violaceus",  taxon: "Coleoptera",   fundort: "Sachsen, DE",   datum: "2026-04-18", sammlung: "Käfer-Kollektion",          status: "freigegeben" },
-  { id: "OBJ-003", name: "Araneus diadematus", taxon: "Arachnida",    fundort: "Hessen, DE",    datum: "2026-04-22", sammlung: "Spinnentiere",              status: "ausstehend"  },
-  { id: "OBJ-004", name: "Lacerta agilis",     taxon: "Squamata",     fundort: "Baden-WÜ, DE",  datum: "2026-05-01", sammlung: "Reptilien",                 status: "freigegeben" },
-  { id: "OBJ-005", name: "Apis mellifera",     taxon: "Hymenoptera",  fundort: "NRW, DE",       datum: "2026-05-03", sammlung: "Bienen & Wespen",           status: "ausstehend"  },
-  { id: "OBJ-006", name: "Rana temporaria",    taxon: "Anura",        fundort: "Brandenburg, DE",datum: "2026-05-07", sammlung: "Amphibien",                status: "freigegeben" },
-]; */
-// Testiere mit JSON Datei
-//const MOCK_SPECIMENS= testdata as Specimen[];
+};
+type Loan = {
+  id: number;
+  objectId: number | null;
+  objectName: string | null;
+  borrowerFirstName: string | null;
+  borrowerLastName: string | null;
+  borrowerName: string | null;
+  endDate: string | null;
+  status: string | null;
+  isOverdue: boolean;
+};
 
 
 
@@ -39,16 +46,10 @@ const MOCK_SPECIMENS: Specimen[] = [
 
 
 
-
-
-
-const MOCK_LOANS: Loan[] = [
-  { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",   bis: "2026-06-01", status: "aktiv"     },
-  { id: "LEI-002", objekt: "Carabus violaceus",  an: "Prof. Weber",  bis: "2026-04-30", status: "überfällig"},
-  { id: "LEI-003", objekt: "Lacerta agilis",     an: "M. Schmidt",   bis: "2026-07-15", status: "aktiv"     },
-];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
+
+// Kleine Kennzahlen-Kachel (z. B. "Objekte gesamt", "Aktive Leihen").
 function StatCard({ value, label, sub, accent }: { value: string | number; label: string; sub?: string; accent?: boolean }) {
   return (
     <div className={`stat-card${accent ? " stat-card--accent" : ""}`}>
@@ -59,32 +60,58 @@ function StatCard({ value, label, sub, accent }: { value: string | number; label
   );
 }
 
-function StatusPill({ status }: { status: Specimen["status"] | Loan["status"] }) {
+// Farbiges Status-Badge für Objekt- oder Leihe-Status (grün/gelb/rot/grau je nach Zustand).
+function StatusPill({ status }: { status: Specimen["status"] | string | null }) {
   const map: Record<string, string> = {
     freigegeben: "pill--green",
     ausstehend:  "pill--amber",
     abgelehnt:   "pill--red",
     aktiv:       "pill--green",
     überfällig:  "pill--red",
-    zurück:      "pill--gray",
+    zurückgegeben: "pill--gray",
   };
-  return <span className={`pill ${map[status] ?? "pill--gray"}`}>{status}</span>;
+  const s = status ?? "";
+  return <span className={`pill ${map[s] ?? "pill--gray"}`}>{s}</span>;
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
+
+// Hauptkomponente der /dashboard-Seite. Lädt Objekte, Leihen und
+// rollenspezifische Benachrichtigungsdaten jeweils über eigene useEffect-Hooks.
 export default function DashboardPage() {
   const { signOut } = useClerk();
+  const { userId: clerkId, getToken } = useAuth();
+  const { user } = useUser();
   const router = useRouter();
 
   const [MOCK_SPECIMENS, setAnimals] = useState<Specimen[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [showNotif, setShowNotif] = useState(false);
+  const [pendingTax, setPendingTax] = useState(0);
+  const [userRole, setUserRole] = useState('Nutzer');
 
   const miniMapContainer = useRef<HTMLDivElement>(null);
   const miniMapInstance  = useRef<Map | null>(null);
+  const notifWrapRef     = useRef<HTMLDivElement>(null);
+
+  // Close notification panel on outside click
+  useEffect(() => {
+    if (!showNotif) return;
+    const handler = (e: MouseEvent) => {
+      if (notifWrapRef.current && !notifWrapRef.current.contains(e.target as Node)) {
+        setShowNotif(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNotif]);
 
   // Fetch all animals
+  // Lädt den "zuletzt erfasste Objekte"-Feed und pollt ihn alle 5 Sekunden,
+  // damit neu erfasste Tiere zeitnah im Dashboard auftauchen.
   useEffect(() => {
     const fetchAnimals = async () => {
-      const response = await fetch('http://localhost:5099/api/animals/dashboard');
+      const response = await fetch(`${API}/api/animals/dashboard`);
       const data = await response.json();
       setAnimals(data);
     };
@@ -95,7 +122,56 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch active loans
+  // Lädt die Leihen des Nutzers per Bearer-Token (LoanController erfordert
+  // [Authorize]) und filtert bereits zurückgegebene Leihen heraus, damit nur
+  // aktive/überfällige in der "Aktive Leihen"-Kachel erscheinen.
+  useEffect(() => {
+    if (!clerkId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const res = await fetch(`${API}/api/loan`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok || cancelled) return;
+        const data: Loan[] = await res.json();
+        if (!cancelled) setLoans(data.filter((l) => l.status !== "zurückgegeben"));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [clerkId, getToken]);
+
+  // Fetch role + role-specific notification data
+  // Lädt die eigene Rolle per Bearer-Token (getToken()) — hier also ein
+  // anderes Auth-Muster als bei den Leihen oben — und danach, nur für
+  // Moderator/Admin, die Anzahl ausstehender Taxonomie-Einreichungen.
+  // `cancelled` verhindert, dass nach einem Unmount/erneuten Effect-Lauf noch
+  // State auf einer veralteten Anfrage gesetzt wird (Race-Condition-Schutz).
+  useEffect(() => {
+    if (!clerkId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+        const res = await fetch(`${API}/api/users/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const role = data.role ?? 'Nutzer';
+        if (!cancelled) setUserRole(role);
+        if ((role === 'Moderator' || role === 'Admin') && !cancelled) {
+          const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
+          if (taxRes.ok && !cancelled) setPendingTax((await taxRes.json()).length);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [clerkId, getToken]);
+
   // Mini-map initialization
+  // Initialisiert die MapTiler-Kartenvorschau einmalig und zeigt anschließend
+  // alle bekannten Fundorte als Marker an; räumt die Karteninstanz beim Unmount auf.
   useEffect(() => {
     if (!miniMapContainer.current || miniMapInstance.current) return;
 
@@ -138,10 +214,28 @@ export default function DashboardPage() {
 
 
   const pending   = MOCK_SPECIMENS.filter((s) => s.status === "ausstehend").length;
-  const overdue   = MOCK_LOANS.filter((l) => l.status === "überfällig").length;
+  const overdue   = loans.filter((l) => l.isOverdue).length;
+
+  // Role-based notifications
+  // Baut die Liste der Benachrichtigungen aus den bereits geladenen Daten:
+  // überfällige Leihen und bald fällige Leihen (≤ 3 Tage) für alle Nutzer,
+  // ausstehende Taxonomie-Freigaben für Moderator/Admin, sowie ausstehende
+  // Objekt-Freigaben nur für Admin.
+  interface Notif { icon: string; text: string; sub: string; href: string; urgent?: boolean; }
+  const notifications: Notif[] = [];
+  if (overdue > 0)
+    notifications.push({ icon: '⚠', text: `${overdue} Leihe${overdue !== 1 ? 'n' : ''} überfällig`, sub: 'Rückgabe überschritten', href: '/leihe', urgent: true });
+  const soonLoans = loans.filter(l => { if (!l.endDate || l.isOverdue) return false; return (new Date(l.endDate).getTime() - Date.now()) / 86400000 <= 3; });
+  if (soonLoans.length > 0)
+    notifications.push({ icon: '📅', text: `${soonLoans.length} Leihe${soonLoans.length !== 1 ? 'n' : ''} bald fällig`, sub: 'Rückgabe in ≤ 3 Tagen', href: '/leihe' });
+  if ((userRole === 'Moderator' || userRole === 'Admin') && pendingTax > 0)
+    notifications.push({ icon: '🌿', text: `${pendingTax} Taxonomie-Einreichung${pendingTax !== 1 ? 'en' : ''} ausstehend`, sub: 'Warten auf Moderation', href: '/moderator', urgent: pendingTax >= 5 });
+  if (userRole === 'Admin' && pending > 0)
+    notifications.push({ icon: '📋', text: `${pending} Objekt${pending !== 1 ? 'e' : ''} ausstehend`, sub: 'Warten auf Freigabe', href: '/moderator' });
 
   return (
     <>
+      {/* Komponenten-Styling (CSS-in-JS) für das Dashboard; Abschnitte sind unten mit „── ── " markiert. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:wght@300;400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -440,6 +534,37 @@ export default function DashboardPage() {
           to   { opacity: 1; transform: translateY(0); }
         }
 
+        /* ── Notification panel ── */
+        .notif-wrap { position: relative; }
+        .notif-panel {
+          position: fixed; top: 72px; right: 20px;
+          width: 300px; background: var(--bg-card);
+          border: 1px solid var(--border); border-radius: 4px;
+          box-shadow: 0 8px 32px rgba(0,0,0,.18); z-index: 200; overflow: hidden;
+          animation: fadeUp .15s ease both;
+        }
+        .notif-head {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 10px 14px; border-bottom: 1px solid var(--border);
+        }
+        .notif-head-title { font-size: 10px; letter-spacing: .12em; color: var(--text-mid); text-transform: uppercase; }
+        .notif-head-role  { font-size: 9px; color: var(--text-lo); letter-spacing: .08em; padding: 1px 6px; border: 1px solid var(--border); border-radius: 2px; }
+        .notif-item {
+          display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
+          border-bottom: 1px solid rgba(74,110,61,0.07); text-decoration: none;
+          transition: background .15s;
+        }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item:hover { background: rgba(74,110,61,0.05); }
+        .notif-item--urgent { border-left: 2px solid var(--red); padding-left: 12px; }
+        .notif-item-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+        .notif-item-text { font-size: 11px; color: var(--text-hi); }
+        .notif-item-sub  { font-size: 9px; color: var(--text-lo); margin-top: 2px; letter-spacing: .05em; }
+        .notif-empty { padding: 20px 14px; text-align: center; font-size: 10px; color: var(--text-lo); letter-spacing: .08em; }
+        .notif-footer { padding: 8px 14px; border-top: 1px solid var(--border); text-align: center; }
+        .notif-footer a { font-size: 9px; color: rgba(74,110,61,0.8); letter-spacing: .08em; text-decoration: none; }
+        .notif-footer a:hover { text-decoration: underline; }
+
         /* Scroll */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -471,12 +596,47 @@ export default function DashboardPage() {
             </div>
 
             {/* Notifications */}
-            <button className="notif-btn" title="Benachrichtigungen">
-              ◉
-              {(pending + overdue) > 0 && (
-                <span className="notif-badge">{pending + overdue}</span>
+            <div className="notif-wrap" ref={notifWrapRef}>
+              <button className="notif-btn" title="Benachrichtigungen" onClick={() => setShowNotif(v => !v)}>
+                ◉
+                {notifications.length > 0 && (
+                  <span className="notif-badge">{notifications.length}</span>
+                )}
+              </button>
+              {showNotif && (
+                <div className="notif-panel">
+                  <div className="notif-head">
+                    <span className="notif-head-title">Benachrichtigungen</span>
+                    <span className="notif-head-role">{userRole}</span>
+                  </div>
+                  {notifications.length === 0 ? (
+                    <div className="notif-empty">✓ Keine neuen Benachrichtigungen</div>
+                  ) : (
+                    notifications.map((n, i) => (
+                      <Link
+                        key={i}
+                        href={n.href}
+                        className={`notif-item${n.urgent ? ' notif-item--urgent' : ''}`}
+                        onClick={() => setShowNotif(false)}
+                      >
+                        <span className="notif-item-icon">{n.icon}</span>
+                        <div>
+                          <div className="notif-item-text">{n.text}</div>
+                          <div className="notif-item-sub">{n.sub}</div>
+                        </div>
+                      </Link>
+                    ))
+                  )}
+                  {notifications.length > 0 && (
+                    <div className="notif-footer">
+                      <Link href={userRole === 'Moderator' || userRole === 'Admin' ? '/moderator' : '/leihe'} onClick={() => setShowNotif(false)}>
+                        Alle anzeigen ›
+                      </Link>
+                    </div>
+                  )}
+                </div>
               )}
-            </button>
+            </div>
 
             {/* Logout */}
             <button
@@ -502,7 +662,7 @@ export default function DashboardPage() {
                 <StatCard value={MOCK_SPECIMENS.length} label="Objekte gesamt" sub="in allen Sammlungen" accent />
                 <StatCard value={3} label="Sammlungen" sub="aktiv" />
                 <StatCard value={pending} label="Ausstehend" sub="Taxonomie-Freigabe" />
-                <StatCard value={MOCK_LOANS.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
+                <StatCard value={loans.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
                 <StatCard value={12} label="Fundorte" sub="weltweit kartiert" />
               </div>
             </div>
@@ -534,7 +694,7 @@ export default function DashboardPage() {
                         <tr key={s.id}>
                           <td><span className="td-id">{s.id}</span></td>
                           <td>
-                            <span className="td-name">{s.name}</span>
+                            <span className="td-name">{s.speciesName}</span>
                             <br />
                             <span style={{ fontSize: 9, color: "var(--text-lo)" }}>{s.taxon}</span>
                           </td>
@@ -611,15 +771,25 @@ export default function DashboardPage() {
                     <Link href="/leihe" className="card-action">Alle ›</Link>
                   </div>
                   <div className="card">
-                    {MOCK_LOANS.map((loan) => (
-                      <div key={loan.id} className="loan-item">
-                        <div className="loan-info">
-                          <div className="loan-name">{loan.objekt}</div>
-                          <div className="loan-meta">an {loan.an} · bis {loan.bis}</div>
-                        </div>
-                        <StatusPill status={loan.status} />
+                    {loans.length === 0 ? (
+                      <div style={{ padding: "14px", textAlign: "center", color: "var(--text-lo)", fontSize: 11 }}>
+                        Keine aktiven Leihen
                       </div>
-                    ))}
+                    ) : (
+                      loans.slice(0, 3).map((loan) => (
+                        <div key={loan.id} className="loan-item">
+                          <div className="loan-info">
+                            <div className="loan-name">{loan.objectName ?? `Objekt #${loan.objectId}`}</div>
+                            <div className="loan-meta">
+                              an {[loan.borrowerFirstName, loan.borrowerLastName].filter(Boolean).join(" ") || loan.borrowerName || "—"}
+                              {" · bis "}
+                              {loan.endDate ? new Date(loan.endDate).toLocaleDateString("de-DE") : "—"}
+                            </div>
+                          </div>
+                          <StatusPill status={loan.isOverdue ? "überfällig" : loan.status} />
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 

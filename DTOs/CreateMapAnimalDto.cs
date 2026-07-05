@@ -1,6 +1,6 @@
 namespace TodoApi.DTOs;
 
-
+/// <summary>Request-DTO zum Anlegen eines neuen Objekts/Tieres direkt über die Karten-Ansicht, inkl. Koordinaten und Fundort.</summary>
 public class CreateMapAnimalDto
 {
     public string Name { get; set; } = null!;
@@ -16,4 +16,9 @@ public class CreateMapAnimalDto
     public int? TaxonomyId { get; set; }
     public DateOnly? FindDate { get; set; }
     public string? LocationName { get; set; }
+
+    public string? Description { get; set; }
+    public string? Status { get; set; }
+    public string? Kategorie { get; set; }
+    public string? Lebensraum { get; set; }
 }

@@ -7,6 +7,11 @@ using TodoApi.Models;
 
 namespace TodoApi.Controllers;
 
+/// <summary>
+/// Empfängt Webhook-Events von Clerk (Auth-Provider) und synchronisiert Nutzerdaten in die lokale
+/// Neon-Datenbank. Kein [Authorize] nötig/möglich, da Clerk selbst der Aufrufer ist — die Absicherung
+/// erfolgt stattdessen über die Svix-Signaturprüfung (Webhook-Secret) in <see cref="Handle"/>.
+/// </summary>
 [ApiController]
 [Route("api/clerk/webhook")]
 public class ClerkWebhookController : ControllerBase
@@ -20,6 +25,12 @@ public class ClerkWebhookController : ControllerBase
         _config = config;
     }
 
+    /// <summary>
+    /// Verarbeitet eingehende Clerk-Webhook-Events (POST /api/clerk/webhook).
+    /// Verifiziert zunächst die Svix-Signatur, um sicherzustellen, dass die Anfrage
+    /// tatsächlich von Clerk stammt. Reagiert nur auf "user.created" und "user.updated"
+    /// und legt den Nutzer lokal an bzw. aktualisiert ihn (Upsert nach ClerkId).
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Handle()
     {
@@ -40,6 +51,8 @@ public class ClerkWebhookController : ControllerBase
 
         try
         {
+            // Signaturprüfung via Svix-Bibliothek: verhindert, dass gefälschte Requests
+            // (ohne gültiges Webhook-Secret) Nutzerdaten in der DB verändern können
             var webhook = new Webhook(secret);
             webhook.Verify(payload, headers);
         }
@@ -53,6 +66,7 @@ public class ClerkWebhookController : ControllerBase
 
         var eventType = root.GetProperty("type").GetString();
 
+        // Nur Nutzer-Erstellung/-Änderung wird verarbeitet, alle anderen Clerk-Events werden ignoriert
         if (eventType != "user.created" && eventType != "user.updated")
             return Ok();
 
@@ -65,6 +79,8 @@ public class ClerkWebhookController : ControllerBase
 
         string? email = null;
 
+        // Clerk-Nutzer können mehrere E-Mail-Adressen haben; wir übernehmen die als "primary"
+        // markierte Adresse. Falls keine als primär gefunden wird, dient die erste als Fallback.
         foreach (var emailAddress in data.GetProperty("email_addresses").EnumerateArray())
         {
             var id = emailAddress.GetProperty("id").GetString();
@@ -105,6 +121,8 @@ public class ClerkWebhookController : ControllerBase
             lastName = lastNameElement.GetString();
         }
 
+        // Upsert: existiert der Nutzer (per ClerkId) bereits, wird er aktualisiert,
+        // ansonsten neu angelegt (deckt sowohl "user.created" als auch "user.updated" ab)
         var user = await _db.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId);
 
         if (user == null)
@@ -116,7 +134,7 @@ public class ClerkWebhookController : ControllerBase
                 Username = username ?? clerkId,
                 FirstName = firstName,
                 LastName = lastName,
-                Role = "Nutzer"
+                Role = "Nutzer" // Standardrolle für neu registrierte Nutzer
                 // CreatedAt - wird von Neon bereitgestellt
             };
 

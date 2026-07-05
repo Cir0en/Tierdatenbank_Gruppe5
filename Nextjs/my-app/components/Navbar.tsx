@@ -1,17 +1,33 @@
+// App-weite Navigation (linke Sidebar), die auf praktisch jeder Seite über
+// <Navbar activeNav="..."/> eingebunden wird. Verantwortlich für:
+//  - Anzeige der Navigationspunkte, inkl. rollenbasierter Einschränkung
+//    (z.B. "Moderation"/"Admin" nur für die jeweiligen Rollen sichtbar)
+//  - Ein-/Ausklappen der Sidebar
+//  - Anzeige von Nutzername/Rolle bzw. Login-Link, falls nicht angemeldet
+//  - Laden und periodisches Aktualisieren einer Benachrichtigungszahl
+//    (überfällige Ausleihen + zu prüfende/abgelehnte Taxonomie-Einreichungen)
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
+import { useLanguage } from "../contexts/LanguageContext";
 
+const API = "http://localhost:5099";
+
+// Statische Definition aller möglichen Navigationspunkte. `roles: null` bedeutet
+// für jeden sichtbar; ist ein Array gesetzt, wird der Punkt weiter unten anhand
+// der aktuellen Nutzerrolle (userRole) herausgefiltert.
 const NAV_ITEMS = [
-  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/dashboard" },
-  { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung"  },
-  { id: "karte",     label: "Karte",           icon: "🗺", href: "/karte"     },
-  { id: "leihe",     label: "Ausleihe",        icon: "⇄", href: "/leihe"     },
-  { id: "taxonomie", label: "Taxonomie",       icon: "🌿", href: "/taxonomie" },
-  { id: "export",    label: "Einstellungen",   icon: "⚙", href: "/export"    },
+  { id: "index",     label: "Dashboard",      icon: "⊞", href: "/",           roles: null },
+  { id: "tierliste", label: "Sammlungen",      icon: "🗂", href: "/Sammlung",   roles: null },
+  { id: "karte",     label: "Karte",           icon: "🗺", href: "/karte",      roles: null },
+  { id: "leihe",     label: "Ausleihe",        icon: "⇄", href: "/leihe",      roles: null },
+  { id: "taxonomie", label: "Taxonomie",       icon: "🌿", href: "/taxonomie",  roles: null },
+  { id: "export",    label: "Einstellungen",   icon: "⚙", href: "/export",     roles: null },
+  { id: "moderator", label: "Moderation",      icon: "🛡", href: "/moderator",  roles: ["Moderator", "Admin"] },
+  { id: "admin",     label: "Admin",           icon: "⚙️", href: "/admin",      roles: ["Admin"] },
 ];
 
 type Props = {
@@ -20,15 +36,98 @@ type Props = {
 
 export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
-  const { user } = useUser();
+  const { user, isLoaded } = useUser();
+  const { isSignedIn, getToken } = useAuth();
+  const { t } = useLanguage();
   const [open, setOpen] = useState(true);
+  const [dbRole, setDbRole] = useState<string | null>(null);
+  const [notifCount, setNotifCount] = useState(0);
 
+  // Rolle + Benachrichtigungszahl holen und alle 30 s aktualisieren.
+  // Die Benachrichtigungszahl (notifCount, angezeigt als Badge am Dashboard-Link)
+  // setzt sich aus drei Quellen zusammen:
+  //   1. eigene überfällige Ausleihen
+  //   2. offene Taxonomie-Einreichungen, die auf Prüfung warten (nur für
+  //      Moderator/Admin sichtbar, da nur diese Rollen sie bearbeiten dürfen)
+  //   3. eigene abgelehnte Taxonomie-Einreichungen, die der Nutzer noch nicht
+  //      "gesehen"/verworfen hat (Abgleich gegen eine in localStorage gepflegte
+  //      Liste bereits quittierter Ablehnungs-IDs)
+  // Ein Intervall sorgt dafür, dass die Zahl auch ohne Neuladen der Seite
+  // regelmäßig aktuell bleibt.
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !user?.id) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const token = await getToken();
+        if (!token || cancelled) return;
+
+        // Eigene Rolle aus der Datenbank laden (maßgeblich für Sichtbarkeit von
+        // Nav-Punkten und für die Taxonomie-Zähllogik unten)
+        const meRes = await fetch(`${API}/api/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!meRes.ok || cancelled) return;
+        const me = await meRes.json();
+        const role: string = me.role ?? "Nutzer";
+        if (!cancelled) setDbRole(role);
+
+        let count = 0;
+
+        // Überfällige Leihen (Bearer-Token, LoanController erfordert [Authorize])
+        const loanRes = await fetch(`${API}/api/loan`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (loanRes.ok && !cancelled) {
+          const loans: { isOverdue: boolean }[] = await loanRes.json();
+          count += loans.filter((l) => l.isOverdue).length;
+        }
+
+        // Ausstehende Taxonomie-Einreichungen (Moderator / Admin)
+        if (role === "Moderator" || role === "Admin") {
+          const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
+          if (taxRes.ok && !cancelled) {
+            const subs: unknown[] = await taxRes.json();
+            count += subs.length;
+          }
+        }
+
+        // Eigene abgelehnte Taxonomie-Einreichungen (ohne bereits gelesene)
+        const myRes = await fetch(`${API}/api/taxonomy/submissions/my`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (myRes.ok && !cancelled) {
+          const mine: { id: number; status: string }[] = await myRes.json();
+          let dismissed = new Set<number>();
+          try {
+            const stored = localStorage.getItem("dismissed_tax_rejections");
+            if (stored) dismissed = new Set<number>(JSON.parse(stored));
+          } catch {}
+          count += mine.filter((s) => s.status === "rejected" && !dismissed.has(s.id)).length;
+        }
+
+        if (!cancelled) setNotifCount(count);
+      } catch {
+        // Bei Fehler bleibt dbRole null → Fallback auf Clerk-Metadata
+      }
+    };
+
+    refresh();
+    const interval = setInterval(refresh, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isLoaded, isSignedIn, getToken, user?.id]);
+
+  // Aktiver Nav-Punkt: entweder explizit von der Seite über die `activeNav`-Prop
+  // vorgegeben, oder anhand des aktuellen Next.js-Routen-Pfads ermittelt
+  // (Fallback: "index"/Dashboard, z.B. bei dynamischen Routen wie /tier/[id]).
   const active =
     activeProp ??
     (NAV_ITEMS.find((i) => i.href === router.pathname)?.id ?? "index");
 
   const userName = user?.fullName ?? user?.firstName ?? user?.emailAddresses[0]?.emailAddress ?? "Nutzer";
-  const userRole = (user?.publicMetadata?.role as string) ?? "Nutzer";
+  // DB-Rolle hat Vorrang; Fallback auf Clerk publicMetadata falls API noch lädt
+  const userRole = dbRole ?? (user?.publicMetadata?.role as string) ?? "Nutzer";
   const initials = userName
     .split(" ")
     .map((n) => n[0])
@@ -120,9 +219,34 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           width: 22px;
           text-align: center;
           line-height: 1;
+          position: relative;
         }
         .nb-nav-label {
           font-size: 14px;
+          flex: 1;
+        }
+        .nb-badge {
+          margin-left: auto;
+          background: #ef4444;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 700;
+          border-radius: 999px;
+          padding: 1px 6px;
+          min-width: 18px;
+          text-align: center;
+          line-height: 16px;
+          flex-shrink: 0;
+        }
+        .nb-badge-dot {
+          position: absolute;
+          top: -3px;
+          right: -4px;
+          width: 8px;
+          height: 8px;
+          background: #ef4444;
+          border-radius: 50%;
+          border: 1.5px solid #1a2f1a;
         }
 
         /* ── User section ── */
@@ -200,16 +324,39 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           {open && <span className="nb-logo-text">Collectio</span>}
         </div>
 
-        {/* Nav items */}
+        {/* Nav items: rollenbasiert gefiltert (siehe NAV_ITEMS.roles weiter oben) */}
         <nav className="nb-nav">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter(item =>
+            !item.roles || item.roles.includes(userRole)
+          ).map((item) => (
             <Link
               key={item.id}
               href={item.href}
               className={`nb-nav-item${active === item.id ? " nb-active" : ""}`}
             >
-              <span className="nb-nav-icon">{item.icon}</span>
-              {open && <span className="nb-nav-label">{item.label}</span>}
+              <span className="nb-nav-icon">
+                {item.icon}
+                {!open && item.id === "index" && notifCount > 0 && (
+                  <span className="nb-badge-dot" />
+                )}
+              </span>
+              {open && (
+                <span className="nb-nav-label">
+                  {({
+                    index:     t.nav.dashboard,
+                    tierliste: t.nav.collections,
+                    karte:     t.nav.map,
+                    leihe:     t.nav.loans,
+                    taxonomie: t.nav.taxonomy,
+                    export:    t.nav.settings,
+                    moderator: t.nav.moderation,
+                    admin:     t.nav.admin,
+                  } as Record<string, string>)[item.id] ?? item.label}
+                </span>
+              )}
+              {open && item.id === "index" && notifCount > 0 && (
+                <span className="nb-badge">{notifCount > 99 ? "99+" : notifCount}</span>
+              )}
             </Link>
           ))}
         </nav>
@@ -221,16 +368,28 @@ export default function Navbar({ activeNav: activeProp }: Props) {
           </button>
         </div>
 
-        {/* User */}
-        <div className="nb-user">
-          <div className="nb-avatar">{initials}</div>
-          {open && (
-            <div className="nb-user-info">
-              <div className="nb-user-name">{userName}</div>
-              <div className="nb-user-role">{userRole}</div>
-            </div>
-          )}
-        </div>
+        {/* User / Login */}
+        {isSignedIn ? (
+          <div className="nb-user">
+            <div className="nb-avatar">{initials}</div>
+            {open && (
+              <div className="nb-user-info">
+                <div className="nb-user-name">{userName}</div>
+                <div className="nb-user-role">{userRole}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <Link href="/login" style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "14px 16px", borderTop: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.6)", textDecoration: "none",
+            fontSize: 13, transition: "color 0.15s",
+          }}>
+            <div className="nb-avatar" style={{ background: "#2e4d2e", fontSize: 14 }}>→</div>
+            {open && <span>Anmelden</span>}
+          </Link>
+        )}
 
       </aside>
     </>

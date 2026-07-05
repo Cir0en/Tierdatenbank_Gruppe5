@@ -1,7 +1,13 @@
+// Route /test: einfache Entwickler-/Debug-Seite ohne Produktionsrelevanz.
+// Dient zum manuellen Ausprobieren der Tier-("Animal")-API (GET/POST auf
+// /api/animals) über ein minimales Formular, unabhängig von der eigentlichen
+// Sammlungs-UI. Nicht in der Navbar verlinkt.
 'use client';
 
 import { useState } from 'react';
 
+// Vereinfachtes Test-Datenmodell für ein Sammlungsobjekt (nur ein Subset der
+// tatsächlichen API-Felder, ausreichend für diesen Testzweck).
 type CollectItem = {
   id?: number;
   collectionId?: number;
@@ -22,14 +28,15 @@ export default function AnimalTest() {
     findDate: '2024-01-15',
   });
 
-  // Fetch all animals
+  // Lädt alle Tiere von der API und aktualisiert die lokale Liste
   const fetchAnimals = async () => {
     const response = await fetch('http://localhost:5099/api/animals');
     const data = await response.json();
     setAnimals(data);
   };
 
-  // Create new animal
+  // Legt ein neues Tier per POST an und lädt danach die Liste neu, um das
+  // Ergebnis sichtbar zu machen
   const createAnimal = async (e: React.FormEvent) => {
     e.preventDefault();
     

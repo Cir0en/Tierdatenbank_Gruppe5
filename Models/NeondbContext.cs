@@ -29,11 +29,15 @@ public partial class NeondbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<TaxonomySubmission> TaxonomySubmissions { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder.UseNpgsql("Name=ConnectionStrings:DefaultConnection");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Fremdschlüssel-Verhalten: Löschen der Collection löscht auch ihre Items (Cascade),
+        // während das Löschen von Fundort oder Taxonomie die Items nur "entkoppelt" (SetNull).
         modelBuilder.Entity<CollectItem>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("collect_items_pkey");
@@ -60,6 +64,7 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.AgeClass).HasColumnName("age_class");
             entity.Property(e => e.BodyMassGram).HasColumnName("body_mass_gram");
             entity.Property(e => e.BodyLengthMm).HasColumnName("body_length_mm");
+            // Kategorie + Lebensraum: [NotMapped] bis ALTER TABLE ausgeführt wurde
 
             entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
                 .HasForeignKey(d => d.CollectionId)
@@ -77,6 +82,7 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("collect_items_taxonomy_id_fkey");
         });
 
+        // Löschen des Besitzer-Users löscht auch dessen Sammlungen (Cascade).
         modelBuilder.Entity<Collection>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("collections_pkey");
@@ -97,6 +103,8 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("collections_user_id_fkey");
         });
 
+        // ExternalId ist eindeutig (Unique-Index); Parent-Fremdschlüssel nutzt Restrict, damit
+        // Standorte mit Kind-Knoten nicht versehentlich mitsamt ihrer Hierarchie gelöscht werden.
         modelBuilder.Entity<GeoLocation>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("geo_locations_pkey");
@@ -133,6 +141,12 @@ public partial class NeondbContext : DbContext
 
             entity.HasIndex(e => e.ObjectId, "idx_loans_object");
 
+            // Verhindert auf DB-Ebene, dass dasselbe Objekt gleichzeitig zwei offene Leihen hat
+            // (siehe sql/2026-07-02_add_unique_open_loan_index.sql für das manuelle Anlegen in Neon).
+            entity.HasIndex(e => e.ObjectId, "idx_loans_object_open_unique")
+                .IsUnique()
+                .HasFilter("status = 'offen'");
+
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.BorrowerId).HasColumnName("borrower_id");
             entity.Property(e => e.EndDate).HasColumnName("end_date");
@@ -159,6 +173,7 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("loans_object_id_fkey");
         });
 
+        // Löschen des zugehörigen CollectItems löscht auch dessen Bilder (Cascade).
         modelBuilder.Entity<ObjectImage>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("object_images_pkey");
@@ -170,6 +185,19 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
             entity.Property(e => e.ImageUrl).HasColumnName("image_url");
+            entity.Property(e => e.ImageData)
+                .HasColumnName("image_data")
+                .HasColumnType("bytea");
+
+            entity.Property(e => e.ContentType)
+                .HasColumnName("content_type")
+                .HasMaxLength(100);
+
+            entity.Property(e => e.OriginalFileName)
+                .HasColumnName("original_file_name");
+
+            entity.Property(e => e.ByteSize)
+                .HasColumnName("byte_size");
             entity.Property(e => e.ObjectId).HasColumnName("object_id");
 
             entity.HasOne(d => d.Object).WithMany(p => p.ObjectImages)
@@ -178,6 +206,9 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("object_images_object_id_fkey");
         });
 
+        // Name+ParentId ist zusammen eindeutig (verhindert doppelte Kind-Knoten mit gleichem Namen
+        // unter demselben Eltern-Knoten). Parent-Fremdschlüssel nutzt Restrict (kein Kaskaden-Löschen
+        // ganzer Taxonomie-Teilbäume); CreatedBy nutzt SetNull, falls der anlegende User gelöscht wird.
         modelBuilder.Entity<Taxonomy>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("taxonomy_pkey");
@@ -208,6 +239,35 @@ public partial class NeondbContext : DbContext
                 .HasConstraintName("taxonomy_parent_id_fkey");
         });
 
+        // Keine Fremdschlüssel-Constraints hier definiert (CreatedBy/ReviewedBy sind reine
+        // User-Id-Referenzen ohne EF-Navigation/-Konstraint auf DB-Ebene).
+        modelBuilder.Entity<TaxonomySubmission>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("taxonomy_submissions_pkey");
+
+            entity.ToTable("taxonomy_submissions");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+
+            entity.Property(e => e.Reich).HasColumnName("reich");
+            entity.Property(e => e.Stamm).HasColumnName("stamm");
+            entity.Property(e => e.Klasse).HasColumnName("klasse");
+            entity.Property(e => e.Ordnung).HasColumnName("ordnung");
+            entity.Property(e => e.Familie).HasColumnName("familie");
+            entity.Property(e => e.Gattung).HasColumnName("gattung");
+            entity.Property(e => e.Art).HasColumnName("art");
+
+            entity.Property(e => e.Source).HasColumnName("source");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.ModeratorNote).HasColumnName("moderator_note");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.ReviewedAt).HasColumnName("reviewed_at");
+            entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
+        });
+
+        // ClerkId, Email und Username sind jeweils eindeutig (Unique-Indizes), da sie zur
+        // Identifikation/zum Login-Abgleich mit Clerk bzw. zur Anzeige dienen.
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("users_pkey");
@@ -235,7 +295,15 @@ public partial class NeondbContext : DbContext
                 .HasDefaultValueSql("'Nutzer'::text")
                 .HasColumnName("role");
             entity.Property(e => e.Username).HasColumnName("username");
+
+            entity.Property(e => e.IsBanned)
+                .HasDefaultValue(false)
+                .HasColumnName("is_banned");
+
+            entity.Property(e => e.DeletedAt)
+                .HasColumnName("deleted_at");
         });
+
 
         OnModelCreatingPartial(modelBuilder);
     }
