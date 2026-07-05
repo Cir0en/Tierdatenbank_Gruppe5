@@ -27,6 +27,7 @@ public partial class Dashboard : ContentPage
         await _viewModel.LoadDataCommand.ExecuteAsync(null);
     }
 
+
 /*
 	private async Task LoadAnimalsAsync()
 	{

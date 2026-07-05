@@ -5,6 +5,7 @@ using Tierapp.Services;
 using Microsoft.Extensions.DependencyInjection;
 using LocalizationResourceManager.Maui;
 using System.Resources;
+using Tierapp.Views;
 
 namespace Tierapp;
 
@@ -46,11 +47,18 @@ public static class MauiProgram
 		// ViewModel registrieren
 		services.AddTransient<SammlungsViewModel>();
 		services.AddTransient<SettingsViewModel>();
+		services.AddTransient<DashboardViewModel>();
+		services.AddTransient<SammlungDetailsViewModel>();
+		services.AddTransient<AnimalDetailViewModel>();
 
 		// Pages registrieren
 		services.AddTransient<Dashboard>();
 		services.AddTransient<Sammlungen>();
 		services.AddTransient<Settings>();
+		services.AddTransient<NewAnimal>();
+		services.AddTransient<SammlungDetails>();
+		services.AddTransient<AnimalDetail>();
+		services.AddTransient<SplashPage>();
 	} 
 
 }

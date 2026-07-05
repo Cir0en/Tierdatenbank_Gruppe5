@@ -56,4 +56,19 @@ public partial class SammlungsViewModel : ObservableObject
             IsBusy = false;
         }
     }
+
+
+    [RelayCommand]
+    public async Task NavigatetoCollectionDetailsAsync(int collectionId)
+    {
+        try
+        {
+            // Navigiere zur Sammlung-Details-Seite und übergebe die collectionId
+            await Shell.Current.GoToAsync($"SammlungDetails?collectionId={collectionId}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Navigation error: {ex.Message}");
+        }
+    }
 }

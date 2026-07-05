@@ -1,55 +1,92 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="Tierapp.Dashboard"
-             xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui">
+<ContentPage
+    x:Class="Tierapp.Dashboard"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui">
 
-    <ScrollView>
-        <VerticalStackLayout
-            Padding="20"
-            Spacing="12">
-            <Label Text="{translator:Translate DashboardHeader}" FontSize="28" FontAttributes="Bold" TextColor="#1A2421" />
-            <Label Text="{translator:Translate DashboardUnderHeader}" TextColor="Gray" />
+    <RefreshView Command="{Binding LoadDataCommand}" IsRefreshing="{Binding IsBusy}">
+        <ScrollView>
+            <VerticalStackLayout Padding="20" Spacing="20">
+                
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="{translator:Translate DashboardHeader}" FontSize="28" FontAttributes="Bold" />
+                    <Label Text="{translator:Translate DashboardUnderHeader}" TextColor="Gray" />
+                </VerticalStackLayout>
 
-            <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" ColumnSpacing="15" RowSpacing="15">
-                <Frame Grid.Row="0" Grid.Column="0" CornerRadius="20" HasShadow="True">
+                <Grid ColumnDefinitions="*,*" RowDefinitions="*,*" ColumnSpacing="15" RowSpacing="15">
+                    <Frame Grid.Row="0" Grid.Column="0" CornerRadius="20" HeightRequest="130">
+                        <VerticalStackLayout>
+                            <Label Text="🦋" FontSize="30"/>
+                            <Label Text="{Binding AnimalCount}" FontSize="20" FontAttributes="Bold"/>
+                            <Label Text="{translator:Translate DBFindingsLabel}" FontSize="12"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    <Frame Grid.Row="0" Grid.Column="1" CornerRadius="20" HeightRequest="130">
+                        <VerticalStackLayout>
+                            <Label Text="📁" FontSize="30"/>
+                            <Label Text="{Binding CollectionCount}" FontSize="20" FontAttributes="Bold"/>
+                            <Label Text="{translator:Translate DBCollectionsLabel}" FontSize="12"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    <Frame Grid.Row="1" Grid.Column="0" CornerRadius="20" HeightRequest="130">
+                        <VerticalStackLayout>
+                            <Label Text="🌍" FontSize="30"/>
+                            <Label Text="{Binding LocationCount}" FontSize="20" FontAttributes="Bold"/>
+                            <Label Text="{translator:Translate DBLocationsLabel}" FontSize="12"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    <Frame Grid.Row="1" Grid.Column="1" CornerRadius="20" HeightRequest="130">
+                        <VerticalStackLayout>
+                            <Label Text="📦" FontSize="30"/>
+                            <Label Text="5" FontSize="20" FontAttributes="Bold"/>
+                            <Label Text="{translator:Translate DBLoansLabel}" FontSize="12"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    </Grid>
+
+                <Label Text="{translator:Translate DBQuick}" FontAttributes="Bold" FontSize="18" />
+                <HorizontalStackLayout Spacing="15">
+                    <Frame CornerRadius="15" WidthRequest="120" HeightRequest="100">
+                        <Frame.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding NavigateToSettingsCommand}" />
+                        </Frame.GestureRecognizers>
+                        <VerticalStackLayout>
+                            <Label Text="⚙️​" FontSize="24" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate DBQuickSettings}" FontSize="10" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    <Frame CornerRadius="15" WidthRequest="110" HeightRequest="100">
+                        <Frame.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding NavigateToCollectionsCommand}" />
+                        </Frame.GestureRecognizers>
+                        <VerticalStackLayout>
+                            <Label Text="📁" FontSize="24" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate DBQuickCollections}" FontSize="10" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                    <Frame CornerRadius="15" WidthRequest="120" HeightRequest="100">
+                        <Frame.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding NavigateToMapCommand}" />
+                        </Frame.GestureRecognizers>
+                        <VerticalStackLayout>
+                            <Label Text="🌍" FontSize="24" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate DBQuickMap}" FontSize="10" FontAttributes="Bold" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                </HorizontalStackLayout>
+
+                <Label Text="Benachrichtigungen" FontAttributes="Bold" FontSize="18" />
+                <Frame CornerRadius="15">
                     <VerticalStackLayout>
-                        <Label Text="🦋" FontSize="24"/>
-                        <Label Text="245" FontSize="20" FontAttributes="Bold"/>
-                        <Label Text="{translator:Translate DBFindingsLabel}" FontSize="12"/>
+                        <Label Text="Systemnachricht" FontAttributes="Bold"/>
+                        <Label Text="Neuer Taxonomieeintrag" FontSize="12" TextColor="Gray"/>
                     </VerticalStackLayout>
                 </Frame>
-                <Frame Grid.Row="0" Grid.Column="1" CornerRadius="20" HasShadow="True">
-                    <VerticalStackLayout>
-                        <Label Text="📁" FontSize="24"/>
-                        <Label Text="12" FontSize="20" FontAttributes="Bold"/>
-                        <Label Text="{translator:Translate DBCollectionsLabel}" FontSize="12"/>
-                    </VerticalStackLayout>
-                </Frame>
-                <Frame Grid.Row="1" Grid.Column="0" CornerRadius="20" HasShadow="True">
-                    <VerticalStackLayout>
-                        <Label Text="​📍​​" FontSize="24"/>
-                        <Label Text="43" FontSize="20" FontAttributes="Bold"/>
-                        <Label Text="{translator:Translate DBLocationsLabel}" FontSize="12"/>
-                    </VerticalStackLayout>
-                </Frame>
-                <Frame Grid.Row="1" Grid.Column="1" CornerRadius="20" HasShadow="True">
-                    <VerticalStackLayout>
-                        <Label Text="📦​" FontSize="24"/>
-                        <Label Text="3" FontSize="20" FontAttributes="Bold"/>
-                        <Label Text="{translator:Translate DBLoansLabel}" FontSize="12"/>
-                    </VerticalStackLayout>
-                </Frame>
-            </Grid>
 
-            
-
-
-        
-        </VerticalStackLayout>
-    </ScrollView>
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+    
 
 </ContentPage>
-
-
-

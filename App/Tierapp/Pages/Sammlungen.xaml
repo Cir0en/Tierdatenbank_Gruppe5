@@ -3,7 +3,8 @@
     x:Class="Tierapp.Sammlungen"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui">
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    x:Name="SammlungenPage">
 
     <Grid Padding="20" RowDefinitions="Auto, *, Auto">
             <Label Grid.Row="0"
@@ -27,6 +28,9 @@
                                 Padding="0"
                                 CornerRadius="20"
                                 HasShadow="True">
+                                <Frame.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding BindingContext.NavigatetoCollectionDetailsCommand, Source={x:Reference SammlungenPage}}" CommandParameter="{Binding Id}" />
+                                </Frame.GestureRecognizers>
                                 <VerticalStackLayout>
                                     <Image
                                         Aspect="AspectFill"
@@ -44,6 +48,7 @@
                 </CollectionView>
             </RefreshView>
 
+            
         </Grid>
 
 </ContentPage>

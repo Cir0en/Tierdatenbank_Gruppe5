@@ -18,8 +18,8 @@
             <Button Text="{translator:Translate ChineseLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="zh-Hans" /> 
 
             <Label Text="{translator:Translate ThemeSettingsHeader}" FontSize="20" FontAttributes="Bold" TextColor="#1A2421" Margin="0,20,0,10"/>
-            <Button Text="{translator:Translate LightThemeButton}" Clicked="OnLightModeClicked" />
-            <Button Text="{translator:Translate DarkThemeButton}" Clicked="OnDarkModeClicked" />
+            <Button Text="{translator:Translate LightThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Light" />
+            <Button Text="{translator:Translate DarkThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Dark" />
 
 
         </VerticalStackLayout>

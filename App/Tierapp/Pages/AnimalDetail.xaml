@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="Tierapp.AnimalDetail"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    x:Name="AnimalDetailPage">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="20">
+
+            <Border StrokeShape="RoundRectangle 20,20,20,20" HeightRequest="200" StrokeThickness="0" Padding="0">
+                <Image Source="default_placeholder.png" Aspect="AspectFill"/>
+            </Border>
+
+            
+            <Label Text="{Binding AnimalDetails.Name}" FontSize="22" FontAttributes="Bold"/>
+
+            <Label Text="Artdetails" FontAttributes="Bold" FontSize="18"/>
+            
+            <Frame CornerRadius="15" HasShadow="True" Padding="10">
+                    <VerticalStackLayout>
+                        <Label Text="{Binding AnimalDetails.FindDate}" FontSize="16" />
+                        <Label Text="{Binding AnimalDetails.Description}" FontSize="16"/>
+                    </VerticalStackLayout>
+            </Frame>
+            
+            
+
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

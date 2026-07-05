@@ -17,17 +17,5 @@ public partial class Settings : ContentPage
         BindingContext = viewModel;
     }
 
-    public async void OnDarkModeClicked(object sender, EventArgs e)
-    {
-        await Shell.Current.DisplayAlert("Theme", "Dark mode selected", "OK");
-        // Implement dark mode logic here
-    }
-
-    public async void OnLightModeClicked(object sender, EventArgs e)
-    {
-        await Shell.Current.DisplayAlert("Theme", "Light mode selected", "OK");
-        // Implement light mode logic here
-    }
-
 }
 

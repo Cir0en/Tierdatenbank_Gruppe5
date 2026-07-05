@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="Tierapp.SammlungDetails"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    x:Name="SammlungDetailsPage">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="20">
+
+            <Border StrokeShape="RoundRectangle 20,20,20,20" HeightRequest="200" StrokeThickness="0" Padding="0">
+                <Image Source="default_placeholder.png" Aspect="AspectFill"/>
+            </Border>
+
+            <Frame CornerRadius="20" HasShadow="True">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="{Binding CollectionDetails.Name}" FontSize="22" FontAttributes="Bold"/>
+                    <Label Text="{Binding CollectionDetails.OwnerUsername, StringFormat='Erstellt von {0}'}" TextColor="Gray"/>
+                    
+                    <Grid ColumnDefinitions="*,*,*" Margin="0,10,0,0">
+                        <VerticalStackLayout Grid.Column="0">
+                            <Label Text="{Binding CollectionDetails.Items.Count}" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="Objekte" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1">
+                            <Label Text="28" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="Arten" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="2">
+                            <Label Text="43" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="Fundorte" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+
+            <Button Text="Export" CornerRadius="10" BackgroundColor="#2D8A4D" TextColor="White"/>
+
+            <Label Text="Neueste Arten" FontAttributes="Bold" FontSize="18"/>
+            <CollectionView ItemsSource="{Binding CollectionDetails.Items}" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <HorizontalStackLayout Spacing="15" Padding="10">
+                            <Image Source="default_placeholder.png" WidthRequest="60" HeightRequest="60" Aspect="AspectFill"/>
+                            <Frame CornerRadius="10" Padding="5" BackgroundColor="#F0F0F0" HasShadow="True">
+                                <Frame.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding BindingContext.NavigateToAnimalDetailsCommand, Source={x:Reference SammlungDetailsPage}}" CommandParameter="{Binding Id}" />
+                                </Frame.GestureRecognizers>   
+                            <VerticalStackLayout VerticalOptions="Center">
+                                <Label Text="{Binding Name}" FontAttributes="Bold"/>
+                                <Label Text="{Binding FindDate}" TextColor="Gray"/>
+                            </VerticalStackLayout>
+                            </Frame>
+                        </HorizontalStackLayout>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+
+</ContentPage>

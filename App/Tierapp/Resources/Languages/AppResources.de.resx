@@ -67,4 +67,29 @@
 <data name="ChineseLanguageButton" xml:space="preserve">
   <value>Chinese</value>
 </data>
+<data name="DBQuick" xml:space="preserve">
+  <value>Schnellnavigation</value>
+</data>
+<data name="DBQuickSettings" xml:space="preserve">
+  <value>Einstellungen</value>
+</data>
+<data name="DBQuickCollections" xml:space="preserve">
+  <value>Sammlungen</value>
+</data>
+<data name="DBQuickMap" xml:space="preserve">
+  <value>Karte öffnen</value>
+</data>
+<data name="Collections" xml:space="preserve">
+  <value>Sammlungen</value>
+</data>
+<data name="Dashboard" xml:space="preserve">
+  <value>Dashboard</value>
+</data>
+<data name="Map" xml:space="preserve">
+  <value>Karte</value>
+</data>
+<data name="Settings" xml:space="preserve">
+  <value>Einstellungen</value>
+</data>
+
 </root>

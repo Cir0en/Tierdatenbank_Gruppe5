@@ -24,4 +24,16 @@ public partial class SettingsViewModel : ObservableObject
         _localization.CurrentCulture = new CultureInfo(cultureCode);
         Preferences.Default.Set("AppLanguage", cultureCode);
     }
+
+    [RelayCommand]
+    public void ChangeTheme(string theme)
+    {
+       Application.Current.UserAppTheme = theme switch
+    {
+        "Light" => AppTheme.Light,
+        "Dark" => AppTheme.Dark,
+    };
+
+    Preferences.Default.Set("AppTheme", theme);
+    }
 }

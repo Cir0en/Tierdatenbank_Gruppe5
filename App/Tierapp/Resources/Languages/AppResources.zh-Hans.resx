@@ -65,4 +65,29 @@
 <data name="ItalianLanguageButton" xml:space="preserve">
   <value>Italian</value>
 </data>
+<data name="DBQuick" xml:space="preserve">
+  <value>快速导航</value>
+</data>
+<data name="DBQuickSettings" xml:space="preserve">
+  <value>设置</value>
+</data>
+<data name="DBQuickCollections" xml:space="preserve">
+  <value>收藏</value>
+</data>
+<data name="DBQuickMap" xml:space="preserve">
+  <value>打开地图</value>
+</data>
+<data name="Collections" xml:space="preserve">
+  <value>收藏</value>
+</data>
+<data name="Dashboard" xml:space="preserve">
+  <value>仪表板</value>
+</data>
+<data name="Map" xml:space="preserve">
+  <value>地图</value>
+</data>
+<data name="Settings" xml:space="preserve">
+  <value>设置</value>
+</data>
+
 </root>
