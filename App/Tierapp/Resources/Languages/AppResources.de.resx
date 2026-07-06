@@ -91,5 +91,22 @@
 <data name="Settings" xml:space="preserve">
   <value>Einstellungen</value>
 </data>
-
+<data name="Export" xml:space="preserve">
+  <value>Exportieren</value>
+</data>
+<data name="Objects" xml:space="preserve">
+  <value>Objekte</value>
+</data>
+<data name="Species" xml:space="preserve">
+  <value>Arten</value>
+</data>
+<data name="Locations" xml:space="preserve">
+  <value>Orte</value>
+</data>
+<data name="CreatedBy" xml:space="preserve">
+  <value>Erstellt von</value>
+</data>
+<data name="Search" xml:space="preserve">
+  <value>Suche</value>
+</data>
 </root>

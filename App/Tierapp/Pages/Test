@@ -56,3 +56,12 @@
             <Label Text="{Binding AnimalDetails.ageClass}" FontSize="16"/>
             <Label Text="{Binding AnimalDetails.bodyMassGram}" FontSize="16"/>
             <Label Text="{Binding AnimalDetails.bodyLengthMm}" FontSize="16"/>
+
+
+                BackgroundColor="#FFB5ECBC"
+    Shell.TabBarBackgroundColor="{StaticResource White}"
+    Shell.TabBarForegroundColor="{StaticResource Primary}"
+    Shell.TabBarTitleColor="{StaticResource Primary}"
+    Shell.TabBarUnselectedColor="{StaticResource Gray500}"
+    Shell.TitleColor="{StaticResource Primary}"
+    Shell.DisabledColor="{StaticResource Gray300}"

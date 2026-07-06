@@ -16,5 +16,5 @@ public class CollectionDetailDto
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
 
-    public List<AnimalListDto> Items { get; set; } = new();
+    public List<CollectionItemDto> Items { get; set; } = new();
 }

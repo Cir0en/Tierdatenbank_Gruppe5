@@ -3,13 +3,6 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:local="clr-namespace:Tierapp"
-    BackgroundColor="#FFB5ECBC"
-    Shell.TabBarBackgroundColor="{StaticResource White}"
-    Shell.TabBarForegroundColor="{StaticResource Primary}"
-    Shell.TabBarTitleColor="{StaticResource Primary}"
-    Shell.TabBarUnselectedColor="{StaticResource Gray500}"
-    Shell.TitleColor="{StaticResource Primary}"
-    Shell.DisabledColor="{StaticResource Gray300}"
     xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
     xmlns:views="clr-namespace:Tierapp.Views">
 

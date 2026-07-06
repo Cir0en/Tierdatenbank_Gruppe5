@@ -89,5 +89,22 @@
 <data name="Settings" xml:space="preserve">
   <value>设置</value>
 </data>
-
+<data name="Export" xml:space="preserve">
+  <value>导出</value>
+</data>
+<data name="Objects" xml:space="preserve">
+  <value>对象</value>
+</data>
+<data name="Species" xml:space="preserve">
+  <value>物种</value>
+</data>
+<data name="Locations" xml:space="preserve">
+  <value>地点</value>
+</data>
+<data name="CreatedBy" xml:space="preserve">
+  <value>创建者</value>
+</data>
+<data name="Search" xml:space="preserve">
+  <value>搜索</value>
+</data>
 </root>

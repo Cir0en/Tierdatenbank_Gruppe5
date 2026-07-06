@@ -1,5 +1,7 @@
 using System.Net.Http.Json;
 using Tierapp.DTOs;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Tierapp.Services;
 
@@ -57,9 +59,36 @@ public class ApiService
         return response ?? new CollectionDetailDto();
     }
 
-    public async Task<AnimalListDto> GetAnimalDetailsAsync(int animalId)
+    public async Task<CollectionItemDto> GetAnimalDetailsAsync(int animalId)
     {
-        var response = await _httpClient.GetFromJsonAsync<AnimalListDto>($"api/animals/{animalId}");
-        return response ?? new AnimalListDto();
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+
+        var response = await _httpClient.GetFromJsonAsync<CollectionItemDto>($"api/animals/{animalId}", options);
+        return response ?? new CollectionItemDto();
+    }
+
+    public async Task<ImageDto> GetAnimalImagesAsync(int animalId)
+    {
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var images = await _httpClient.GetFromJsonAsync<List<ImageDto>>($"api/images/{animalId}", options);
+            var image = images?.FirstOrDefault();
+
+            if (image != null && !string.IsNullOrEmpty(image.ImageUrl) && image.ImageUrl.StartsWith("/"))
+            {
+                image.ImageUrl = new Uri(_httpClient.BaseAddress!, image.ImageUrl).ToString();
+            }
+            return image;    
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading images for animal {animalId}: {ex.Message}");
+            return null;
+        }
     }
 }

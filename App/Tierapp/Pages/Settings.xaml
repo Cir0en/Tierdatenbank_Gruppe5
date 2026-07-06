@@ -9,15 +9,15 @@
         <VerticalStackLayout
             Padding="20"
             Spacing="12">
-            <Label Text="{translator:Translate SettingsHeader}" FontSize="28" FontAttributes="Bold" TextColor="#1A2421" />
+            <Label Text="{translator:Translate SettingsHeader}" FontSize="28" FontAttributes="Bold"/>
 
-            <Label Text="{translator:Translate LanguageSettingsHeader}" FontSize="20" FontAttributes="Bold" TextColor="#1A2421" Margin="0,20,0,10"/>
+            <Label Text="{translator:Translate LanguageSettingsHeader}" FontSize="20" FontAttributes="Bold" Margin="0,20,0,10"/>
             <Button Text="{translator:Translate EnglishLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="en-US" />
             <Button Text="{translator:Translate GermanLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="de-DE" />
             <Button Text="{translator:Translate ItalianLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="it-IT" />
             <Button Text="{translator:Translate ChineseLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="zh-Hans" /> 
 
-            <Label Text="{translator:Translate ThemeSettingsHeader}" FontSize="20" FontAttributes="Bold" TextColor="#1A2421" Margin="0,20,0,10"/>
+            <Label Text="{translator:Translate ThemeSettingsHeader}" FontSize="20" FontAttributes="Bold" Margin="0,20,0,10"/>
             <Button Text="{translator:Translate LightThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Light" />
             <Button Text="{translator:Translate DarkThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Dark" />
 

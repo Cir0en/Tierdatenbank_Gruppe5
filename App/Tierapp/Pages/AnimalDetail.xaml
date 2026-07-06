@@ -9,12 +9,13 @@
     <ScrollView>
         <VerticalStackLayout Padding="20" Spacing="20">
 
-            <Border StrokeShape="RoundRectangle 20,20,20,20" HeightRequest="200" StrokeThickness="0" Padding="0">
-                <Image Source="default_placeholder.png" Aspect="AspectFill"/>
+            <Border StrokeShape="RoundRectangle 20,20,20,20" HeightRequest="300" StrokeThickness="0" Padding="0">
+                <Image Source="{Binding AnimalImageUrl}" Aspect="AspectFill"/>
             </Border>
 
             
             <Label Text="{Binding AnimalDetails.Name}" FontSize="22" FontAttributes="Bold"/>
+            <Label Text="{Binding AnimalDetails.Taxonomy.Name}" FontSize="18" FontAttributes="Italic"/>
 
             <Label Text="Artdetails" FontAttributes="Bold" FontSize="18"/>
             
@@ -22,6 +23,9 @@
                     <VerticalStackLayout>
                         <Label Text="{Binding AnimalDetails.FindDate}" FontSize="16" />
                         <Label Text="{Binding AnimalDetails.Description}" FontSize="16"/>
+                        <Label Text="{Binding AnimalDetails.BodyLengthMm, StringFormat='Körperlänge: {0} mm'}" FontSize="16"/>
+                        <Label Text="{Binding AnimalDetails.BodyMassGram, StringFormat='Gewicht: {0} g'}" FontSize="16"/>
+                        <Label Text="{Binding AnimalDetails.AgeClass, StringFormat='Altersklasse: {0}'}" FontSize="16"/>
                     </VerticalStackLayout>
             </Frame>
             

@@ -55,7 +55,6 @@ public static class MauiProgram
 		services.AddTransient<Dashboard>();
 		services.AddTransient<Sammlungen>();
 		services.AddTransient<Settings>();
-		services.AddTransient<NewAnimal>();
 		services.AddTransient<SammlungDetails>();
 		services.AddTransient<AnimalDetail>();
 		services.AddTransient<SplashPage>();

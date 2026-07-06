@@ -109,7 +109,7 @@ namespace TodoApi.Controllers
                             .OrderBy(img => img.CreatedAt)
                             .Select(img => img.ImageUrl)
                             .FirstOrDefault(),
-
+                        
                         ImageStoredInDatabase = item.ObjectImages
                             .OrderBy(img => img.CreatedAt)
                             .Select(img => img.ImageData != null)

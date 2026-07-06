@@ -16,10 +16,13 @@ public partial class AnimalDetailViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    private AnimalListDto _animalDetails;
+    private CollectionItemDto _animalDetails;
 
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
+
+    [ObservableProperty]
+    private string? animalImageUrl;
 
     [RelayCommand]
     public async Task LoadAnimalDetailsAsync(int animalId)
@@ -33,6 +36,9 @@ public partial class AnimalDetailViewModel : ObservableObject
             Console.WriteLine($"Loaded animal details for ID {animalId} from API.");
 
             AnimalDetails = data;
+
+            var image = await _apiService.GetAnimalImagesAsync(animalId);
+            AnimalImageUrl = image?.ImageUrl ?? "default_placeholder.png"; // Fallback to placeholder if no image
         }
         catch (Exception ex)
         {

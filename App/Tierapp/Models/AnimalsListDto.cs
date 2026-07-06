@@ -7,4 +7,5 @@ public class AnimalListDto
     public DateOnly? FindDate { get; set; }
     public string? Status { get; set; }
     public string? Description { get; set; }
+    
 }
