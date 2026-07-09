@@ -65,3 +65,12 @@
     Shell.TabBarUnselectedColor="{StaticResource Gray500}"
     Shell.TitleColor="{StaticResource Primary}"
     Shell.DisabledColor="{StaticResource Gray300}"
+
+
+
+ngrok http 5099
+dotnet run
+cd .\Nextjs\my-app\ 
+npm run dev  
+
+dotnet build -f net10.0-android

@@ -2,6 +2,7 @@
 using LocalizationResourceManager.Maui;
 using System.Globalization;
 using CommunityToolkit.Mvvm.Input;
+using Plugin.Firebase.CloudMessaging;
 
 namespace Tierapp;
 
@@ -21,4 +22,18 @@ public partial class App : Application
 	{
 		return new Window(new AppShell());
 	}
+
+	protected override async void OnStart()
+{
+    base.OnStart();
+    try
+    {
+        await CrossFirebaseCloudMessaging.Current.SubscribeToTopicAsync("all_users");
+        Console.WriteLine("Subscribed to topic 'all_users'");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"FCM subscribe error: {ex.Message}");
+    }
+}
 }

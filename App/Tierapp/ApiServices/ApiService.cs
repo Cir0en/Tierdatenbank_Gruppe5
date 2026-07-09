@@ -32,25 +32,25 @@ public class ApiService
     public async Task<int> GetCollectionsCountAsync()
     {
         var response = await _httpClient.GetFromJsonAsync<List<CollectionListDto>>("api/collections");
-        return response.Count;
+        return response?.Count ?? 0;
     }
 
     public async Task<int> GetFindingsCountAsync()
     {
         var response = await _httpClient.GetFromJsonAsync<List<AnimalListDto>>("api/animals");
-        return response.Count;
+        return response?.Count ?? 0;
     }
 
     public async Task<int> GetLocationsCountAsync()
     {
         var response = await _httpClient.GetFromJsonAsync<List<LocationListDto>>("api/geolocations");
-        return response.Count;
+        return response?.Count ?? 0;
     }
 
     public async Task<int> GetLoansCountAsync()
     {
         var response = await _httpClient.GetFromJsonAsync<List<LoanListDto>>("api/loans");
-        return response.Count;
+        return response?.Count ?? 0;
     }
 
     public async Task<CollectionDetailDto> GetCollectionDetailsAsync(int collectionId)
@@ -89,6 +89,24 @@ public class ApiService
         {
             Console.WriteLine($"Error loading images for animal {animalId}: {ex.Message}");
             return null;
+        }
+    }
+
+    public async Task<bool> SendTestNotificationAsync(string title, string body)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/animals", new
+            {
+                Name = title,
+                Description = body
+            });
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error sending test notification: {ex.Message}");
+            return false;
         }
     }
 }
