@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="Tierapp.SammlungDetails"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    x:Name="SammlungDetailsPage">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="20">
+
+            <Border StrokeShape="RoundRectangle 20,20,20,20" HeightRequest="200" StrokeThickness="0" Padding="0">
+                <Image Source="default_placeholder.png" Aspect="AspectFill"/>
+            </Border>
+
+            <Frame CornerRadius="20" HasShadow="True">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="{Binding CollectionDetails.Name}" FontSize="22" FontAttributes="Bold"/>
+                    <Label Text="{Binding CollectionDetails.OwnerUsername, StringFormat='{translator:Translate CreatedBy} {0}'}" TextColor="Gray"/>
+                    
+                    <Grid ColumnDefinitions="*,*,*" Margin="0,10,0,0">
+                        <VerticalStackLayout Grid.Column="0">
+                            <Label Text="{Binding CollectionDetails.Items.Count}" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate Objects}" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1">
+                            <Label Text="28" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate Species}" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="2">
+                            <Label Text="43" FontSize="18" FontAttributes="Bold" HorizontalOptions="Center"/>
+                            <Label Text="{translator:Translate Locations}" FontSize="12" HorizontalOptions="Center"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                </VerticalStackLayout>
+            </Frame>
+
+            <Button Text="{translator:Translate Export}" Command="{Binding ExportCollectionCommand}" CornerRadius="10"/>
+
+            <Label Text="{translator:Translate Species}" FontAttributes="Bold" FontSize="18"/>
+
+            <SearchBar Placeholder="{translator:Translate Search}" Text="{Binding SearchText}"/>
+
+            <CollectionView ItemsSource="{Binding FilteredItems}" 
+                            SelectionMode="None"
+                            ItemSizingStrategy="MeasureFirstItem">
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                            <Border
+                                    StrokeShape="RoundRectangle 10"
+                                    Padding="10"
+                                    BackgroundColor="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray900}}"
+                                    HorizontalOptions="Fill">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding BindingContext.NavigateToAnimalDetailsCommand, Source={x:Reference SammlungDetailsPage}}" CommandParameter="{Binding Id}" />
+                                </Border.GestureRecognizers>
+                                <VerticalStackLayout VerticalOptions="Center">
+                                    <Label Text="{Binding Name}" FontAttributes="Bold"/>
+                                    <Label Text="{Binding FindDate}" TextColor="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray400}}"/>
+                                </VerticalStackLayout>
+                            </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

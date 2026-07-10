@@ -1,0 +1,29 @@
+<Shell
+    x:Class="Tierapp.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:Tierapp"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    xmlns:views="clr-namespace:Tierapp.Views">
+
+    <ShellContent Route="SplashPage" ContentTemplate="{DataTemplate views:SplashPage}"
+        Shell.FlyoutBehavior="Disabled"
+                  Shell.NavBarIsVisible="False"
+                  Shell.TabBarIsVisible="False" />
+
+    <TabBar Route ="MainTabs">
+        <Tab Title="{translator:Translate Dashboard}"  Icon="homeicon.svg" Route="DashboardTab">
+            <ShellContent ContentTemplate="{DataTemplate local:Dashboard}" />
+        </Tab>
+        <Tab Title="{translator:Translate Map}" Icon="mapicon.svg" Route="MapTab">
+            <ShellContent ContentTemplate="{DataTemplate local:Map}" />
+        </Tab>
+        <Tab Title="{translator:Translate Collections}" Icon="sammlungicon.svg" Route="CollectionsTab">
+            <ShellContent ContentTemplate="{DataTemplate local:Sammlungen}" />
+        </Tab>
+        <Tab Title="{translator:Translate Settings}" Icon="settingsicon.svg" Route="SettingsTab">
+            <ShellContent ContentTemplate="{DataTemplate local:Settings}" />
+        </Tab>
+    </TabBar>
+
+</Shell>

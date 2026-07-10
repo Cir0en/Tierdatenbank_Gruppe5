@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="Tierapp.Sammlungen"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui"
+    x:Name="SammlungenPage">
+
+    <Grid Padding="20" RowDefinitions="Auto, *, Auto">
+            <Label Grid.Row="0"
+                SemanticProperties.HeadingLevel="Level1"
+                Style="{StaticResource Headline}"
+                Text="{translator:Translate HeadlineCollections}" />
+
+            <RefreshView Grid.Row="1" Command="{Binding LoadCollectionsCommand}" IsRefreshing="{Binding IsBusy}">
+                <CollectionView ItemsSource="{Binding Collections}" VerticalOptions="Fill">
+                    <CollectionView.ItemsLayout>
+                        <GridItemsLayout
+                            HorizontalItemSpacing="10"
+                            Orientation="Vertical"
+                            Span="2"
+                            VerticalItemSpacing="10" />
+                    </CollectionView.ItemsLayout>
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Frame
+                                Margin="10"
+                                Padding="0"
+                                CornerRadius="20"
+                                HasShadow="True">
+                                <Frame.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding BindingContext.NavigatetoCollectionDetailsCommand, Source={x:Reference SammlungenPage}}" CommandParameter="{Binding Id}" />
+                                </Frame.GestureRecognizers>
+                                <VerticalStackLayout>
+                                    <Image
+                                        Aspect="AspectFill"
+                                        HeightRequest="150"
+                                        Source="default_placeholder.png" />
+                                    <VerticalStackLayout Padding="10">
+                                        <Label FontAttributes="Bold" Text="{Binding Name}" />
+                                        <Label FontSize="12" Text="{Binding ItemCount, StringFormat='{0} Objekte'}" />
+                                        <Label FontSize="12" Text="{Binding Description}" />
+                                    </VerticalStackLayout>
+                                </VerticalStackLayout>
+                            </Frame>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </RefreshView>
+
+            
+        </Grid>
+
+</ContentPage>

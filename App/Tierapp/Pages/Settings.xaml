@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Tierapp.Settings"
+             xmlns:translator="clr-namespace:LocalizationResourceManager.Maui;assembly=LocalizationResourceManager.Maui">
+
+
+    <ScrollView>
+        <VerticalStackLayout
+            Padding="20"
+            Spacing="12">
+            <Label Text="{translator:Translate SettingsHeader}" FontSize="28" FontAttributes="Bold"/>
+
+            <Label Text="{translator:Translate LanguageSettingsHeader}" FontSize="20" FontAttributes="Bold" Margin="0,20,0,10"/>
+            <Button Text="{translator:Translate EnglishLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="en-US" />
+            <Button Text="{translator:Translate GermanLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="de-DE" />
+            <Button Text="{translator:Translate ItalianLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="it-IT" />
+            <Button Text="{translator:Translate ChineseLanguageButton}" Command="{Binding ChangeLanguageCommand}" CommandParameter="zh-Hans" /> 
+
+            <Label Text="{translator:Translate ThemeSettingsHeader}" FontSize="20" FontAttributes="Bold" Margin="0,20,0,10"/>
+            <Button Text="{translator:Translate LightThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Light" />
+            <Button Text="{translator:Translate DarkThemeButton}" Command="{Binding ChangeThemeCommand}" CommandParameter="Dark" />
+
+
+        </VerticalStackLayout>
+
+    </ScrollView>
+
+</ContentPage>
+

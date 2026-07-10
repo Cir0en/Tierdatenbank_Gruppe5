@@ -24,7 +24,7 @@ const API = "http://localhost:5099";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Specimen = {
-  id: string; speciesName: string; taxon?: string; fundort?: string;
+  id: string; name: string; taxon?: string; fundort?: string;
   datum?: string; findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 };
 type Loan = {
