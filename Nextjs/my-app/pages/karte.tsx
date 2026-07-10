@@ -4,7 +4,7 @@
 // Tiere als Marker. Bietet außerdem einen Wechsel zur Heatmap-Ansicht (pages/heatmap.tsx).
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
@@ -17,6 +17,15 @@ const SELTENHEIT_OPTIONS = ['Häufig','Selten','Sehr selten','Ungefährdet','Wic
 
 interface TaxonomyOption { id: number; name: string; rank: string | null; }
 interface CollectionOption { id: number; name: string; isPublic: boolean; }
+
+interface MapItem {
+  itemId: number;
+  itemName: string | null;
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  sex: string | null;
+}
 
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
 
@@ -255,10 +264,47 @@ export default function MapPage() {
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapInstance  = useRef<Map | null>(null);
+  // Marker-Instanzen nach Item-ID, damit die Suche beim Treffer das passende
+  // Popup öffnen kann statt nur zur Position zu springen.
+  const markersRef   = useRef<globalThis.Map<number, Marker>>(new globalThis.Map());
 
   const [formOpen, setFormOpen]     = useState(false);
   const [formCoords, setFormCoords] = useState<{ lng: number; lat: number } | null>(null);
   const [taxonomies, setTaxonomies] = useState<TaxonomyOption[]>([]);
+
+  // ── Suche ─────────────────────────────────────────────────────────────
+  // Alle geladenen Marker-Items werden hier gespiegelt, damit rein clientseitig
+  // (ohne zusätzlichen API-Call) nach Artname/Fundort gefiltert werden kann.
+  const [items, setItems]           = useState<MapItem[]>([]);
+  const [search, setSearch]         = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return items
+      .filter(it => (it.itemName ?? '').toLowerCase().includes(q) || it.locationName.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [search, items]);
+
+  // Springt zur Position eines Suchtreffers und öffnet dessen Popup.
+  const flyToItem = (it: MapItem) => {
+    const map = mapInstance.current;
+    if (!map) return;
+    map.flyTo({ center: [it.longitude, it.latitude], zoom: 14 });
+    new Popup({ closeButton: true, closeOnClick: true, maxWidth: '220px' })
+      .setLngLat([it.longitude, it.latitude])
+      .setHTML(`
+        <div style="padding:10px 12px;font-family:sans-serif;font-size:13px;">
+          <div style="font-weight:600;margin-bottom:4px;">${it.itemName ?? it.locationName}</div>
+          <div style="color:#5f6368;font-size:11px;margin-bottom:8px;">${it.locationName}</div>
+          <a href="/tier/${it.itemId}" style="color:#0078FF;font-size:12px;font-weight:600;">Details ansehen →</a>
+        </div>
+      `)
+      .addTo(map);
+    setSearch('');
+    setSearchOpen(false);
+  };
 
   // Ref-Callback: map-click → React-State (kein Re-Render-Problem)
   const openFormRef = useRef<((lng: number, lat: number) => void) | null>(null);
@@ -328,7 +374,12 @@ export default function MapPage() {
     addMarkerRef.current = (name, sex, id, lng, lat) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
       el.addEventListener('click', () => { window.location.href = `/tier/${id}`; });
-      new Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+      const marker = new Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+      markersRef.current.set(id, marker);
+      setItems(prev => [
+        ...prev,
+        { itemId: id, itemName: name, locationName: name, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex },
+      ]);
     };
 
     // ── Klick auf Karte ──────────────────────────────────────────────────
@@ -368,21 +419,16 @@ export default function MapPage() {
         const res = await fetch(`${API}/api/geolocations/map-items`, { headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        const items: {
-          itemId: number;
-          itemName: string | null;
-          locationName: string;
-          latitude: number;
-          longitude: number;
-          sex: string | null;
-        }[] = await res.json();
+        const items: MapItem[] = await res.json();
 
         for (const item of items) {
           const label = item.itemName ?? item.locationName;
           const el    = createMarkerElement(label, item.sex ?? undefined);
           el.addEventListener('click', () => { window.location.href = `/tier/${item.itemId}`; });
-          new Marker({ element: el }).setLngLat([item.longitude, item.latitude]).addTo(map);
+          const marker = new Marker({ element: el }).setLngLat([item.longitude, item.latitude]).addTo(map);
+          markersRef.current.set(item.itemId, marker);
         }
+        setItems(items);
       } catch (err) {
         console.error('Marker konnten nicht geladen werden:', err);
       }
@@ -409,6 +455,49 @@ export default function MapPage() {
 
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+
+        <div className="map-search-wrap">
+          <span className="map-search-icon">🔍</span>
+          <input
+            type="text"
+            className="map-search-input"
+            placeholder="Tier oder Fundort suchen…"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setSearchOpen(true); }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+          />
+          {search && (
+            <button
+              className="map-search-clear"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { setSearch(''); setSearchOpen(false); }}
+              title="Suche löschen"
+            >
+              ✕
+            </button>
+          )}
+
+          {searchOpen && search.trim() !== '' && (
+            <div className="map-search-results" onMouseDown={e => e.preventDefault()}>
+              {searchResults.length === 0 ? (
+                <div className="map-search-empty">Keine Treffer für „{search}“</div>
+              ) : (
+                searchResults.map(it => (
+                  <div key={it.itemId} className="map-search-result" onClick={() => flyToItem(it)}>
+                    <span className="map-search-result-icon">
+                      {it.sex === 'Männlich' ? '♂' : it.sex === 'Weiblich' ? '♀' : '◉'}
+                    </span>
+                    <div className="map-search-result-text">
+                      <div className="map-search-result-name">{it.itemName ?? it.locationName}</div>
+                      <div className="map-search-result-loc">{it.locationName}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
 
         <button className="view-switch-btn" onClick={goToHeatmap} title="Zur Heatmap wechseln">
           🔥 Heatmap
@@ -441,6 +530,44 @@ export default function MapPage() {
             transition: background .15s, transform .15s;
           }
           .view-switch-btn:hover { background: #fff; transform: translateY(-1px); }
+
+          /* ── Karten-Suche ── */
+          .map-search-wrap {
+            position: absolute; top: 12px; left: 12px; z-index: 500;
+            display: flex; align-items: center; gap: 6px;
+            background: rgba(255,255,255,.95); border: 1px solid #dadce0;
+            border-radius: 20px; padding: 8px 14px;
+            font-family: 'Inter', system-ui, sans-serif;
+            box-shadow: 0 2px 8px rgba(0,0,0,.18);
+            width: min(300px, calc(100vw - 24px));
+          }
+          .map-search-icon  { font-size: 13px; color: #5f6368; flex-shrink: 0; }
+          .map-search-input {
+            border: none; outline: none; background: transparent;
+            font-size: 13px; color: #202124; flex: 1; min-width: 0;
+            font-family: inherit;
+          }
+          .map-search-clear {
+            border: none; background: none; cursor: pointer; color: #9aa0a6;
+            font-size: 12px; padding: 2px 4px; line-height: 1; flex-shrink: 0;
+          }
+          .map-search-clear:hover { color: #5f6368; }
+          .map-search-results {
+            position: absolute; top: calc(100% + 6px); left: 0; width: 100%;
+            max-height: 320px; overflow-y: auto;
+            background: #fff; border-radius: 10px; border: 1px solid #dadce0;
+            box-shadow: 0 8px 24px rgba(0,0,0,.18);
+          }
+          .map-search-empty { padding: 12px 14px; font-size: 12px; color: #9aa0a6; }
+          .map-search-result {
+            display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+            cursor: pointer; transition: background .15s;
+          }
+          .map-search-result:hover      { background: #f1f5ff; }
+          .map-search-result-icon       { font-size: 14px; color: #0078FF; flex-shrink: 0; }
+          .map-search-result-text       { min-width: 0; }
+          .map-search-result-name       { font-size: 13px; font-weight: 600; color: #202124; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .map-search-result-loc        { font-size: 11px; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
           /* ── Marker ── */
           .custom-marker { pointer-events: auto; cursor: pointer; }

@@ -9,7 +9,10 @@ namespace TodoApi.Controllers
     /// Verwaltet Bild-Uploads für Fundobjekte (CollectItems). Bilder werden als Dateien im
     /// lokalen "uploads"-Verzeichnis gespeichert, in der DB wird nur der relative Pfad (ImageUrl)
     /// referenziert. Aktuell gilt ein 1-Bild-Limit pro Objekt: ein neuer Upload ersetzt ein
-    /// vorhandenes Bild. Alle Endpunkte sind aktuell mit [AllowAnonymous] offen.
+    /// vorhandenes Bild. Lesezugriffe (GET) bleiben öffentlich; Upload/Delete prüfen wie in
+    /// <see cref="CollectionController"/> manuell über <see cref="GetCurrentUserAsync"/> und
+    /// <see cref="CanModifyItem"/>, ob der anfragende Nutzer Eigentümer der Sammlung des
+    /// Fundobjekts ist oder Admin/Moderator-Rechte hat.
     /// </summary>
     [ApiController]
     [Route("api/images")]
@@ -86,6 +89,7 @@ namespace TodoApi.Controllers
 
         // POST /api/images/upload/{animalId} - lädt ein Bild für ein Fundobjekt hoch (max. 10 MB).
         // Ersetzt ein evtl. vorhandenes Bild des Objekts (1-Bild-Limit pro Objekt).
+        // Nur der Eigentümer der Sammlung des Fundobjekts oder Admin/Moderator dürfen hochladen.
         [HttpPost("upload/{animalId:int}")]
         [AllowAnonymous]
         [RequestSizeLimit(11 * 1024 * 1024)] // 10 MB
@@ -102,8 +106,14 @@ namespace TodoApi.Controllers
             if (!AllowedTypes.Contains(contentType))
                 return BadRequest("Nur JPEG, PNG, GIF oder WebP erlaubt.");
 
-            var exists = await _context.CollectItems.AnyAsync(c => c.Id == animalId, cancellationToken);
-            if (!exists) return NotFound("Tier nicht gefunden.");
+            var item = await _context.CollectItems
+                .Include(c => c.Collection)
+                .FirstOrDefaultAsync(c => c.Id == animalId, cancellationToken);
+            if (item == null) return NotFound("Tier nicht gefunden.");
+
+            var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null) return Unauthorized();
+            if (!CanModifyItem(currentUser, item)) return Forbid();
 
             // Vorhandenes Bild löschen (1-Bild-Limit): sowohl Datei auf der Festplatte
             // als auch den zugehörigen DB-Eintrag entfernen, bevor das neue Bild gespeichert wird
@@ -178,13 +188,21 @@ namespace TodoApi.Controllers
         return Ok(new { image.Id, image.ImageUrl, image.CreatedAt });
     }*/
 
-        // DELETE /api/images/{imageId} — löscht ein Bild sowohl aus der Datenbank als auch von der Festplatte
+        // DELETE /api/images/{imageId} — löscht ein Bild sowohl aus der Datenbank als auch von der Festplatte.
+        // Nur der Eigentümer der Sammlung des zugehörigen Fundobjekts oder Admin/Moderator dürfen löschen.
         [HttpDelete("{imageId:int}")]
         [AllowAnonymous]
         public async Task<IActionResult> DeleteImage(int imageId, CancellationToken cancellationToken)
         {
-            var image = await _context.ObjectImages.FindAsync([imageId], cancellationToken);
+            var image = await _context.ObjectImages
+                .Include(i => i.Object)
+                .ThenInclude(o => o!.Collection)
+                .FirstOrDefaultAsync(i => i.Id == imageId, cancellationToken);
             if (image == null) return NotFound();
+
+            var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null) return Unauthorized();
+            if (image.Object == null || !CanModifyItem(currentUser, image.Object)) return Forbid();
 
             /*
             // Datei vom Datenträger löschen
@@ -198,6 +216,39 @@ namespace TodoApi.Controllers
             await _context.SaveChangesAsync(cancellationToken);
 
             return NoContent();
+        }
+
+        // Ermittelt den aktuell angemeldeten Nutzer aus dem Request (gleiches Pattern wie
+        // CollectionController.GetCurrentUserAsync): zuerst der X-Clerk-User-Id-Header, sonst der
+        // JWT-sub-Claim. Gibt null zurück, wenn kein Nutzer identifiziert werden kann.
+        private async Task<User?> GetCurrentUserAsync()
+        {
+            var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(clerkId))
+                clerkId = User.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrWhiteSpace(clerkId))
+                return null;
+
+            return await _context.Users
+                .FirstOrDefaultAsync(u => u.ClerkId == clerkId);
+        }
+
+        // Bearbeitungsrecht für ein Fundobjekt: Eigentümer der zugehörigen Sammlung oder
+        // Admin/Moderator. Objekte ohne Sammlung (CollectionId == null) haben keinen ermittelbaren
+        // Eigentümer und dürfen daher nur von Admin/Moderator bearbeitet werden.
+        private static bool CanModifyItem(User user, CollectItem item)
+        {
+            return CanModerateCollections(user)
+                || (item.Collection != null && item.Collection.UserId == user.Id);
+        }
+
+        // Moderationsrechte gelten für die Rollen Admin und Moderator
+        private static bool CanModerateCollections(User user)
+        {
+            return user.Role == "Admin"
+                || user.Role == "Moderator";
         }
     }
 }
