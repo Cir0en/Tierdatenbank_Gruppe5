@@ -74,3 +74,62 @@ cd .\Nextjs\my-app\
 npm run dev  
 
 dotnet build -f net10.0-android
+
+
+
+os_v2_app_fcip6ifncjekjiqvgfvuqmk43onwa2luglje7kfgg4cwyn22mv7ekgc4onbbykh5ki3olvvtyipww5yaplktljrn4x73f7a4iwqvnfq
+
+
+curl -X \
+POST --url 'https://api.onesignal.com/notifications' \
+ --header 'content-type: application/json; charset=utf-8' \
+ --header 'authorization: Key os_v2_app_fcip6ifncjekjiqvgfvuqmk43onwa2luglje7kfgg4cwyn22mv7ekgc4onbbykh5ki3olvvtyipww5yaplktljrn4x73f7a4iwqvnfq' \
+ --data \
+ '{
+  "app_id": "2890ff20-ad12-48a4-a215-316b48315cdb",
+  "target_channel": "push",
+  "name": "Testing basic setup",
+  "headings": {
+  	"en": "👋"
+  },
+  "contents": {
+    "en": "Hello world!"
+  },
+  "included_segments": [
+    "Test Users"
+  ],
+  "ios_attachments": {
+    "onesignal_logo": "https://avatars.githubusercontent.com/u/11823027?s=200&v=4"
+  },
+  "big_picture": "https://avatars.githubusercontent.com/u/11823027?s=200&v=4"
+}'
+
+
+
+curl.exe -X POST --url "https://api.onesignal.com/notifications" `
+  --header "content-type: application/json; charset=utf-8" `
+  --header "authorization: Key os_v2_app_fcip6ifncjekjiqvgfvuqmk43onwa2luglje7kfgg4cwyn22mv7ekgc4onbbykh5ki3olvvtyipww5yaplktljrn4x73f7a4iwqvnfq" `
+  --data '{\"app_id\": \"2890ff20-ad12-48a4-a215-316b48315cdb\",
+   \"target_channel\": \"push\",
+    \"name\": \"Testing basic setup\",
+     \"headings\": {\"en\": \"Hello\"},
+      \"contents\": {\"en\": \"Hello world!\"},
+       \"included_segments\": [\"Test Users\"],
+        \"big_picture\": \"https://avatars.githubusercontent.com/u/11823027?s=200&v=4\"}'
+
+
+
+curl.exe -X POST --url "https://api.onesignal.com/notifications" `
+  --header "content-type: application/json; charset=utf-8" `
+  --header "authorization: Key os_v2_app_fcip6ifncjekjiqvgfvuqmk43onwa2luglje7kfgg4cwyn22mv7ekgc4onbbykh5ki3olvvtyipww5yaplktljrn4x73f7a4iwqvnfq" `
+  --data '{\"app_id\": \"2890ff20-ad12-48a4-a215-316b48315cdb\",
+   \"target_channel\": \"push\",
+    \"name\": \"New Collection\",
+     \"headings\": {\"en\": \"A new public collection was added!\"},
+      \"contents\": {\"en\": \"Check it out now in the Collectio App\"},
+       \"included_segments\": [\"Test Users\"]}'
+
+
+curl.exe -X POST "https://localhost:5099/api/notifications/send" `
+  --header "content-type: application/json" `
+  --data '{\"title\": \"Test Notification\", \"body\": \"Hello aus dem Activity Feed!\", \"segment\": \"Test Users\"}'

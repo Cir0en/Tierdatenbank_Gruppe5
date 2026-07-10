@@ -11,6 +11,7 @@ namespace Tierapp.ViewModels;
 public partial class DashboardViewModel : ObservableObject
 {
     private readonly ApiService _apiService;
+    private readonly NotificationFeedService _service = new();
 
     // Wir lassen uns das Interface injizieren
     public DashboardViewModel(ApiService apiService)
@@ -23,6 +24,8 @@ public partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private string _locationCount;
     [ObservableProperty] private string _loanCount;
     [ObservableProperty] public partial ObservableCollection<DashboardItem> DashboardItems { get; set; } = new();
+
+    [ObservableProperty] ObservableCollection<NotificationRecordDto> notifications = new();
 
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
@@ -45,9 +48,10 @@ public partial class DashboardViewModel : ObservableObject
             var task2 = _apiService.GetFindingsCountAsync();
             var task3 = _apiService.GetLocationsCountAsync();
             //var task4 = _apiService.GetLoansCountAsync();
+            var notificationsTask = _service.GetNotificationsAsync();
+            //var task4 = _apiService.GetLoansCountAsync();
 
-            await Task.WhenAll(task1, task2, task3);
-            //await Task.WhenAll(task1, task2, task3, task4);
+            await Task.WhenAll(task1, task2, task3, notificationsTask);
 
             CollectionCount = task1.Result.ToString();
             AnimalCount = task2.Result.ToString(); 
@@ -59,6 +63,8 @@ public partial class DashboardViewModel : ObservableObject
             DashboardItems.Add(new DashboardItem { Title = "Collections", Count = CollectionCount, Icon = "📁" });
             DashboardItems.Add(new DashboardItem { Title = "Locations", Count = LocationCount, Icon = "🌍" });
             DashboardItems.Add(new DashboardItem { Title = "Loans", Count = "5", Icon = "📦" });
+
+            Notifications = new ObservableCollection<NotificationRecordDto>(notificationsTask.Result);
 
         }
         catch (Exception ex)

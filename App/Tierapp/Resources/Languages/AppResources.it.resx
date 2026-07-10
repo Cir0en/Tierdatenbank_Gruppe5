@@ -109,4 +109,10 @@
 <data name="Search" xml:space="preserve">
   <value>Cerca</value>
 </data>
+<data name="Notifications" xml:space="preserve">
+  <value>Notifiche</value>
+</data>
+<data name="NoNotifications" xml:space="preserve">
+  <value>Non ci sono notifiche ancora</value>
+</data>
 </root>

@@ -31,6 +31,8 @@ public partial class NeondbContext : DbContext
 
     public virtual DbSet<TaxonomySubmission> TaxonomySubmissions { get; set; }
 
+    public virtual DbSet<NotificationRecord> Notifications { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         => optionsBuilder.UseNpgsql("Name=ConnectionStrings:DefaultConnection");
 
@@ -302,6 +304,21 @@ public partial class NeondbContext : DbContext
 
             entity.Property(e => e.DeletedAt)
                 .HasColumnName("deleted_at");
+        });
+
+        modelBuilder.Entity<NotificationRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("notifications_pkey");
+
+            entity.ToTable("notifications");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Body).HasColumnName("body");
+            entity.Property(e => e.Segment).HasColumnName("segment");
+            entity.Property(e => e.SentAt)
+                .HasDefaultValueSql("now()");
+            entity.Property(e => e.id_onesignal).HasColumnName("id_onesignal");
         });
 
 

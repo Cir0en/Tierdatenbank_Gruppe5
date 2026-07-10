@@ -107,4 +107,10 @@
 <data name="Search" xml:space="preserve">
   <value>搜索</value>
 </data>
+<data name="Notifications" xml:space="preserve">
+  <value>通知</value>
+</data>
+<data name="NoNotifications" xml:space="preserve">
+  <value>暂无通知</value>
+</data>
 </root>

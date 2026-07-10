@@ -91,6 +91,7 @@
 		<EmbeddedResource Update="Resources\Languages\AppResources.zh-Hans.resx">
 			<Generator>ResXFileCodeGenerator</Generator>
 		</EmbeddedResource>
+		<PackageReference Include="OneSignalSDK.DotNet" Version="6.2.0" />
 	</ItemGroup>
 
 </Project>

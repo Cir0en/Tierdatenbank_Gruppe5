@@ -103,6 +103,17 @@ builder.Services.AddHttpClient("Clerk", client =>
             clerkSecretKey);
 });
 
+//Notification OneSignal HttpClient
+var oneSignalAppId = builder.Configuration["OneSignal:AppId"];
+var oneSignalApiKey = builder.Configuration["OneSignal:ApiKey"];
+
+builder.Services.AddHttpClient("OneSignal", client =>
+{
+    client.BaseAddress = new Uri("https://api.onesignal.com/");
+    client.DefaultRequestHeaders.Add("authorization",
+        $"Key {oneSignalApiKey}");
+});
+
 var app = builder.Build();
 
 
