@@ -33,6 +33,4 @@ public class CollectionItemDto
 
     /// <summary>Vereinbartes Rückgabedatum der offenen Ausleihe; nur für Eigentümer/Moderation gefüllt, sonst null.</summary>
     public DateOnly? LoanReturnDate { get; set; }
-    public bool ImageStoredInDatabase { get; set; }
-    public int? ImageId { get; set; }
 }
