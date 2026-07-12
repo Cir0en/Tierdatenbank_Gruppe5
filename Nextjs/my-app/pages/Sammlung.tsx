@@ -400,6 +400,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
   const [description, setDesc]      = useState('');
   const [findDate, setFindDate]     = useState('');
@@ -474,7 +475,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   // taxonomyId aus dem GBIF-Workflow) im Backend. Leere/„Unbekannt"-Werte
   // werden bewusst als null statt als leerer String übergeben.
   const handleSave = async () => {
-    if (!name.trim()) { setError('Bitte einen Artnamen eingeben.'); return; }
+    if (!displayName.trim()) { setError('Bitte einen Namen eingeben.'); return; }
     setSaving(true);
     setError(null);
     try {
@@ -482,7 +483,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name:         name.trim(),
+          name:         displayName.trim(),
           description:  description.trim() || null,
           findDate:     findDate || null,
           sex:          sex === 'Unbekannt' ? null : sex,
@@ -513,11 +514,20 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
         <div className="modal-title">🐾 Neues Tier hinzufügen</div>
         {error && <div className="modal-error">{error}</div>}
 
-        {/* Artname + GBIF-Suche */}
+        {/* Eigener Name/Bezeichnung des Eintrags */}
         <div className="form-group">
-          <label className="form-label">Artname <span className="required">*</span></label>
+          <label className="form-label">Name <span className="required">*</span></label>
+          <input type="text" className="form-input" autoFocus
+            placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)} />
+        </div>
+
+        {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
+        <div className="form-group">
+          <label className="form-label">Artname (Taxonomie-Suche)</label>
           <div className="gbif-search-row">
-            <input type="text" className="form-input" autoFocus
+            <input type="text" className="form-input"
               placeholder="z. B. Parnassius apollo"
               value={name}
               onChange={e => { setName(e.target.value); resetGbif(); }}
@@ -528,7 +538,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
               {gbifLoading ? '⏳' : '🔍 Suchen'}
             </button>
           </div>
-          <div className="gbif-hint">Artname eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
+          <div className="gbif-hint">Wissenschaftlichen Artnamen eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
         </div>
 
         {gbifError && <div className="modal-error">{gbifError}</div>}
