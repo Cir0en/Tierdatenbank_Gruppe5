@@ -9,5 +9,4 @@ public class NotificationRecord
     public string Body { get; set; } = "";
     public DateTime SentAt { get; set; }  = DateTime.UtcNow;
     public string? Segment { get; set; }
-    public string id_onesignal { get; set; }
 }

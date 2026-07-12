@@ -106,6 +106,7 @@ builder.Services.AddHttpClient("Clerk", client =>
 //Notification OneSignal HttpClient
 var oneSignalAppId = builder.Configuration["OneSignal:AppId"];
 var oneSignalApiKey = builder.Configuration["OneSignal:ApiKey"];
+Console.WriteLine($"API Key loaded: {!string.IsNullOrEmpty(oneSignalApiKey)}");
 
 builder.Services.AddHttpClient("OneSignal", client =>
 {

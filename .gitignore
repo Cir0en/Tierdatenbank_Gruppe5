@@ -17,6 +17,9 @@ firebase-service-account.json
 #Test File
 **/Test.txt
 
+# MapTiler Key vor Uni-Git schützen
+App/Tierapp/Pages/MapConfig.cs
+
 # User-specific files
 *.rsuser
 *.suo
