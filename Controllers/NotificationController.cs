@@ -33,7 +33,7 @@ public class NotificationsController : ControllerBase
         var client = _httpFactory.CreateClient("OneSignal");
         var payload = new
         {
-            app_id = _config["2890ff20-ad12-48a4-a215-316b48315cdb"],
+            app_id = "2890ff20-ad12-48a4-a215-316b48315cdb",
             target_channel = "push",
             headings = new { en = request.Title },
             contents = new { en = request.Body },

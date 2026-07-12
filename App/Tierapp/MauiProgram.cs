@@ -7,6 +7,8 @@ using LocalizationResourceManager.Maui;
 using System.Resources;
 using Tierapp.Views;
 using Microsoft.Maui.LifecycleEvents;
+using Microsoft.Extensions.Configuration;
+using System.Reflection;
 
 namespace Tierapp;
 
@@ -28,6 +30,9 @@ public static class MauiProgram
 				settings.AddResource(new ResourceManager("Tierapp.Resources.Languages.AppResources", typeof(App).Assembly));
 
 			});
+		
+		var assembly = Assembly.GetExecutingAssembly();
+        builder.Configuration.AddUserSecrets(assembly, optional: true);
 
 		ConfigureServices(builder.Services);
 
@@ -62,6 +67,7 @@ public static class MauiProgram
 		services.AddTransient<SammlungDetails>();
 		services.AddTransient<AnimalDetail>();
 		services.AddTransient<SplashPage>();
+		//services.AddTransient<Map>();
 	} 
 
 }

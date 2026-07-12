@@ -318,7 +318,6 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.Segment).HasColumnName("segment");
             entity.Property(e => e.SentAt)
                 .HasDefaultValueSql("now()");
-            entity.Property(e => e.id_onesignal).HasColumnName("id_onesignal");
         });
 
 

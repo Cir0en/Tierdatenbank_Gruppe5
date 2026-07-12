@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapTiler MAUI</title>
+  <!-- KORREKTUR: Vollständige CDN-Pfade zum MapTiler SDK einbinden -->
+  <script src="https://maptiler.com"></script>
+  <link href="https://maptiler.com" rel="stylesheet" />
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+  let map;
+
+  function initializeMap(apiKey) {
+    // Falls das SDK im Netzwerk noch lädt, kurz warten und erneut versuchen
+    if (typeof maptilergl === 'undefined') {
+      setTimeout(() => initializeMap(apiKey), 200);
+      return;
+    }
+
+    if (!apiKey) {
+      alert("Fehler: Kein MapTiler API-Key von C# übergeben!");
+      return;
+    }
+
+    try {
+      maptilergl.config.apiKey = apiKey;
+      
+      map = new maptilergl.Map({
+        container: 'map',
+        style: maptilergl.MapStyle.STREETS,
+        center: [11.0, 50.0], // Startposition Lng, Lat
+        zoom: 5
+      });
+
+      // Marker hinzufügen
+      const marker = new maptilergl.Marker({ color: "#FF0000" })
+        .setLngLat([11.0, 50.0])
+        .addTo(map);
+
+      // C#-Interaktion bei Klick auslösen
+      marker.getElement().addEventListener('click', () => {
+        window.location.href = "maui://pinclick?name=MainLocation";
+      });
+      
+    } catch (error) {
+      alert("MapTiler JS Fehler: " + error.message);
+    }
+  }
+</script>
+</body>
+</html>
