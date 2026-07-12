@@ -12,7 +12,13 @@ public class CollectionItemDto
     public string? FindingLocation { get; set; }
     public string? Kategorie { get; set; }
     public string? Lebensraum { get; set; }
+
+    /// <summary>Id des ältesten hochgeladenen Bildes (für /api/images/{id}/content); null wenn kein Bild vorhanden.</summary>
+    public int? ImageId { get; set; }
     public string? ImageUrl { get; set; }
+
+    /// <summary>True, wenn das Bild als Byte-Array in der DB liegt (ObjectImage.ImageData) statt nur als ImageUrl referenziert zu sein.</summary>
+    public bool ImageStoredInDatabase { get; set; }
     public string? Description { get; set; }
     public string? Sex { get; set; }
     public string? AgeClass { get; set; }

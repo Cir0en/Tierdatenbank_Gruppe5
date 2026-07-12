@@ -6,6 +6,7 @@
 
 import { useRouter } from 'next/router';
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@clerk/nextjs';
 import Navbar from '../../components/Navbar';
 
 const API = 'http://localhost:5099';
@@ -76,6 +77,7 @@ function formatDate(d: string | null): string | null {
 
 export default function TierDetailPage() {
   const router = useRouter();
+  const { userId } = useAuth();
   const rawId = router.query.id;
   const animalId = Array.isArray(rawId) ? rawId[0] : rawId;
 
@@ -130,7 +132,13 @@ export default function TierDetailPage() {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await fetch(`${API}/api/images/upload/${animalId}`, { method: 'POST', body: fd });
+      const res = await fetch(`${API}/api/images/upload/${animalId}`, {
+        method: 'POST',
+        headers: userId ? { 'X-Clerk-User-Id': userId } : {},
+        body: fd,
+      });
+      if (res.status === 401) throw new Error('Bitte melde dich an, um ein Foto hochzuladen.');
+      if (res.status === 403) throw new Error('Du bist nicht berechtigt, für dieses Tier ein Foto hochzuladen.');
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       await loadImage();
     } catch (e: any) {
@@ -145,8 +153,15 @@ export default function TierDetailPage() {
   // confirm()-Dialog) und entfernt es lokal aus dem State.
   const handleDeleteImg = async () => {
     if (!image || !confirm('Foto wirklich löschen?')) return;
+    setImgError(null);
     try {
-      await fetch(`${API}/api/images/${image.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API}/api/images/${image.id}`, {
+        method: 'DELETE',
+        headers: userId ? { 'X-Clerk-User-Id': userId } : {},
+      });
+      if (res.status === 401) throw new Error('Bitte melde dich an, um dieses Foto zu löschen.');
+      if (res.status === 403) throw new Error('Du bist nicht berechtigt, dieses Foto zu löschen.');
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       setImage(null);
     } catch (e: any) {
       setImgError(e.message);
