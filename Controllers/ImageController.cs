@@ -52,7 +52,7 @@ namespace TodoApi.Controllers
                 return NotFound();
             }
 
-            Response.Headers.CacheControl = "public,max-age=86400";
+            Response.Headers.CacheControl = "no-cache";
 
             return File(image.ImageData, image.ContentType);
         }
@@ -65,7 +65,7 @@ namespace TodoApi.Controllers
             var images = await _context.ObjectImages
                 .AsNoTracking()
                 .Where(i => i.ObjectId == animalId)
-                .OrderBy(i => i.CreatedAt)
+                .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new
                 {
                     i.Id,

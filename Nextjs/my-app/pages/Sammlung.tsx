@@ -44,6 +44,7 @@ interface CollectionItem {
   kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
+  imageCreatedAt: string | null;
   description: string | null;
   sex: string | null;
   ageClass: string | null;
@@ -750,7 +751,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                 <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
                   <img
-                    src={resolveImageUrl(item.imageUrl)}
+                    src={`${resolveImageUrl(item.imageUrl)}?v=${encodeURIComponent(item.imageCreatedAt ?? '')}`}
                     alt={item.name ?? ''}
                     className="animal-card-img"
                   />
