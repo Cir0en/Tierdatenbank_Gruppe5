@@ -11,7 +11,7 @@ import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
 import { useAuth } from '@clerk/nextjs';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 const KATEGORIE_OPTIONS = ['Insekten','Säugetiere','Vögel','Amphibien','Reptilien','Fische','Spinnentiere','Schnecken','Sonstige'];
 const SELTENHEIT_OPTIONS = ['Häufig','Selten','Sehr selten','Ungefährdet','Wichtig','Geschützt','Stark gefährdet'];
 

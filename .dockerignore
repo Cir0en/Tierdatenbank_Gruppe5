@@ -1,0 +1,25 @@
+.git/
+.vs/
+.vscode/
+.claude/
+
+# .NET build output
+bin/
+obj/
+**/bin/
+**/obj/
+*.user
+*.pp.xml
+
+# MAUI app (not part of the web backend image)
+App/
+
+# Next.js frontend (built via its own Dockerfile/context)
+Nextjs/
+
+# runtime data
+uploads/
+
+scripts/
+sql/
+*.md

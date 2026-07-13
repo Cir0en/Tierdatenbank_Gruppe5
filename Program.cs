@@ -1,4 +1,3 @@
-using NextjsStaticHosting.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -70,9 +69,6 @@ builder.Services.AddControllers().AddJsonOptions(options =>
     });
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-
-builder.Services.Configure<NextjsStaticHostingOptions>(builder.Configuration.GetSection("NextjsStaticHosting"));
-builder.Services.AddNextjsStaticHosting();
 
 // Named HttpClient für Abfragen gegen die externe GBIF-Artendatenbank (Taxonomie-Abgleich).
 builder.Services.AddHttpClient("Gbif", client =>
@@ -151,8 +147,5 @@ app.UseMiddleware<TodoApi.Security.UserStatusMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
-
-app.MapNextjsStaticHtmls();
-app.UseNextjsStaticHosting();
 
 app.Run();

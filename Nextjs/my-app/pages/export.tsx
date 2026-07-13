@@ -10,7 +10,7 @@ import { useRouter } from 'next/router';
 import Navbar from '../components/Navbar';
 import { useLanguage, type Lang } from '../contexts/LanguageContext';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 interface UserProfile {
   id: number;
@@ -84,7 +84,7 @@ export default function EinstellungenPage() {
   const handleCsvDownload = async () => {
     setExporting(true);
     try {
-      const res = await fetch('http://localhost:5099/api/animals/export/csv');
+      const res = await fetch(`${API}/api/animals/export/csv`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

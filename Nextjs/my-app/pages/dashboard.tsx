@@ -9,7 +9,7 @@ import Navbar from "../components/Navbar";
 import { Map, MapStyle, config, Marker } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 
-const API = "http://localhost:5099";
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Seite: /dashboard
@@ -189,7 +189,7 @@ export default function DashboardPage() {
     // Datenbankeinträge als Marker in der Vorschau-Karte anzeigen
     map.on('load', async () => {
       try {
-        const res = await fetch('http://localhost:5099/api/geolocations/map-items');
+        const res = await fetch(`${API}/api/geolocations/map-items`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const items: { latitude: number; longitude: number }[] = await res.json();
@@ -694,7 +694,7 @@ export default function DashboardPage() {
                         <tr key={s.id}>
                           <td><span className="td-id">{s.id}</span></td>
                           <td>
-                            <span className="td-name">{s.speciesName}</span>
+                            <span className="td-name">{s.name}</span>
                             <br />
                             <span style={{ fontSize: 9, color: "var(--text-lo)" }}>{s.taxon}</span>
                           </td>

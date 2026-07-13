@@ -12,7 +12,7 @@ import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
 import { useAuth } from '@clerk/nextjs';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 export default function HeatmapPage() {
   const { isSignedIn, userId } = useAuth();
