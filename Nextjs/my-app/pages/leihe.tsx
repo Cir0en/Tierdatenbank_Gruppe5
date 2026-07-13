@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import Navbar from "../components/Navbar";
 
-const API = "http://localhost:5099";
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Seite: /leihe

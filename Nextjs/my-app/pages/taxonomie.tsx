@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Seite: /taxonomie
 // Zweck: Durchsuchbarer, hierarchischer Baum der biologischen Taxonomie
@@ -196,7 +198,7 @@ function CreateModal({ onClose, onSuccess }: {
     setSearching(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:5099/api/taxonomy/gbif?speciesName=${encodeURIComponent(name)}`);
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: GbifPreviewResult = await res.json();
       setGbifResult(data);
@@ -215,7 +217,7 @@ function CreateModal({ onClose, onSuccess }: {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/taxonomy/gbif/confirm', {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usageKey }),
@@ -242,7 +244,7 @@ function CreateModal({ onClose, onSuccess }: {
     setError(null);
     try {
       const token = await getToken();
-      const res = await fetch('http://localhost:5099/api/taxonomy/submissions', {
+      const res = await fetch(`${API}/api/taxonomy/submissions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -451,7 +453,7 @@ export default function TaxonomiePage() {
   // Lädt den kompletten (flachen) Taxonomie-Baum vom Backend; wird sowohl
   // beim initialen Laden als auch nach dem Anlegen eines neuen Eintrags aufgerufen.
   const loadTaxonomies = () =>
-    fetch('http://localhost:5099/api/taxonomy').then(r => {
+    fetch(`${API}/api/taxonomy`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json() as Promise<TaxonomyEntry[]>;
     });
@@ -466,7 +468,7 @@ export default function TaxonomiePage() {
       try {
         const token = await getToken();
         if (!token || cancelled) return;
-        const res = await fetch('http://localhost:5099/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${API}/api/users/me`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok && !cancelled) {
           const data = await res.json();
           setUserRole(data.role ?? 'Nutzer');
@@ -482,7 +484,7 @@ export default function TaxonomiePage() {
   useEffect(() => {
     Promise.all([
       loadTaxonomies(),
-      fetch('http://localhost:5099/api/animals/dashboard').then(r => {
+      fetch(`${API}/api/animals/dashboard`).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
@@ -554,7 +556,7 @@ export default function TaxonomiePage() {
     setDeleteError(null);
     if (!confirm(`„${node.name}" (${node.rank}) wirklich löschen?`)) return;
     try {
-      const res = await fetch(`http://localhost:5099/api/taxonomy/${node.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API}/api/taxonomy/${node.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const text = await res.text();
         setDeleteError(text || `Fehler ${res.status}`);

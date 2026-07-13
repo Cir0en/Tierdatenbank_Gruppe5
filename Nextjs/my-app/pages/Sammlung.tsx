@@ -114,7 +114,7 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/collections', {
+      const res = await fetch(`${API}/api/collections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
         body: JSON.stringify({ name: name.trim(), description: description.trim() || null, isPublic }),
@@ -192,7 +192,7 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
     if (!confirm(`Sammlung „${col.name}" wirklich löschen?`)) return;
     setDeleting(true);
     try {
-      await fetch(`http://localhost:5099/api/collections/${col.id}`, {
+      await fetch(`${API}/api/collections/${col.id}`, {
         method: 'DELETE',
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
@@ -228,7 +228,7 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
 
 // ── Loan Animal Modal ─────────────────────────────────────────────────────────
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 function resolveImageUrl(imageUrl: string): string {
   if (
@@ -437,7 +437,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setGbifLoading(true);
     resetGbif();
     try {
-      const res = await fetch(`http://localhost:5099/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setGbifResult(await res.json());
     } catch (e: any) {
@@ -454,7 +454,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setConfirming(true);
     setGbifError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/taxonomy/gbif/confirm', {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usageKey }),
@@ -479,7 +479,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/animals', {
+      const res = await fetch(`${API}/api/animals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -891,10 +891,10 @@ export default function SammlungPage() {
       const token = await getToken();
       if (!token) { setBorrowedItems([]); return; }
       const authHeaders = { Authorization: `Bearer ${token}` };
-      const meRes = await fetch('http://localhost:5099/api/users/me', { headers: authHeaders });
+      const meRes = await fetch(`${API}/api/users/me`, { headers: authHeaders });
       if (!meRes.ok) { setBorrowedItems([]); return; }
       const me = await meRes.json();
-      const loansRes = await fetch('http://localhost:5099/api/loan', { headers: authHeaders });
+      const loansRes = await fetch(`${API}/api/loan`, { headers: authHeaders });
       if (!loansRes.ok) { setBorrowedItems([]); return; }
       const allLoans: any[] = await loansRes.json();
       setBorrowedItems(
@@ -929,7 +929,7 @@ export default function SammlungPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/collections', {
+      const res = await fetch(`${API}/api/collections`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -951,7 +951,7 @@ export default function SammlungPage() {
     setDetailLoading(true);
     setDetail(null);
     try {
-      const res = await fetch(`http://localhost:5099/api/collections/${id}`, {
+      const res = await fetch(`${API}/api/collections/${id}`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

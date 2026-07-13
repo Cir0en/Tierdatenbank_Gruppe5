@@ -6,6 +6,8 @@
 
 import { useState } from 'react';
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
+
 // Vereinfachtes Test-Datenmodell für ein Sammlungsobjekt (nur ein Subset der
 // tatsächlichen API-Felder, ausreichend für diesen Testzweck).
 type CollectItem = {
@@ -30,7 +32,7 @@ export default function AnimalTest() {
 
   // Lädt alle Tiere von der API und aktualisiert die lokale Liste
   const fetchAnimals = async () => {
-    const response = await fetch('http://localhost:5099/api/animals');
+    const response = await fetch(`${API}/api/animals`);
     const data = await response.json();
     setAnimals(data);
   };
@@ -40,7 +42,7 @@ export default function AnimalTest() {
   const createAnimal = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const response = await fetch('http://localhost:5099/api/animals', {
+    const response = await fetch(`${API}/api/animals`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newAnimal)

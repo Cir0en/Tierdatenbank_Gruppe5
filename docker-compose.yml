@@ -1,0 +1,58 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      Clerk__Authority: ${CLERK_AUTHORITY}
+      Clerk__WebhookSecret: ${CLERK_WEBHOOK_SECRET}
+      OneSignal__AppId: ${ONESIGNAL_APP_ID}
+      OneSignal__ApiKey: ${ONESIGNAL_API_KEY}
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "5099:8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./Nextjs/my-app
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_MAP_API_KEY: ${NEXT_PUBLIC_MAP_API_KEY}
+    environment:
+      # Next.js läuft server-seitig im Docker-Netz und erreicht das Backend
+      # über den Compose-Service-Namen statt über localhost.
+      BACKEND_INTERNAL_URL: http://backend:8080
+      # proxy.ts (Clerk-Middleware) läuft im Next.js-Server und braucht den
+      # Secret Key zur Laufzeit - unabhängig vom Backend, das seine eigene
+      # Kopie für Server-zu-Server-Aufrufe an die Clerk-API bekommt.
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # Tunnelt die Next.js-App (einzige öffentliche Origin, /api & /uploads
+  # laufen serverseitig über die next.config.ts-rewrites zum Backend) nach
+  # außen. NGROK_DOMAIN muss eine reservierte ngrok-Domain sein, damit die
+  # öffentliche URL bei jedem Neustart gleich bleibt (relevant u.a. für die
+  # Clerk-Webhook-URL).
+  ngrok:
+    image: ngrok/ngrok:latest
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command: ["http", "--url=${NGROK_DOMAIN}", "--log=stdout", "frontend:3000"]
+    ports:
+      - "4040:4040"
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  uploads:

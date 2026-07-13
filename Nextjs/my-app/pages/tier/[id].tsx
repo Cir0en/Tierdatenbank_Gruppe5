@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../../components/Navbar';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 
 function resolveImageUrl(imageUrl: string): string {

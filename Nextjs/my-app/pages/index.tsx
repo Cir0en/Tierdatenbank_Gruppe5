@@ -8,6 +8,8 @@ import Navbar from "../components/Navbar";
 import { Map, MapStyle, config, Marker } from "@maptiler/sdk";
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Seite: / (Startseite / Dashboard)
 // Zweck: Zentrale Übersichtsseite nach dem Login (aber auch für Gäste als
@@ -96,7 +98,7 @@ export default function HomePage() {
   useEffect(() => {
     const fetchAnimals = async () => {
       try {
-        const response = await fetch("http://localhost:5099/api/animals/dashboard");
+        const response = await fetch(`${API}/api/animals/dashboard`);
         const data = await response.json();
         setSpecimens(data);
       } catch {
@@ -127,7 +129,7 @@ export default function HomePage() {
 
     map.on("load", async () => {
       try {
-        const res = await fetch("http://localhost:5099/api/geolocations/map-items");
+        const res = await fetch(`${API}/api/geolocations/map-items`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const items: { latitude: number; longitude: number }[] = await res.json();
         items.forEach(({ longitude, latitude }) => {
@@ -156,7 +158,7 @@ export default function HomePage() {
       const token = await getToken();
       if (!token) return;
 
-      const meRes = await fetch("http://localhost:5099/api/users/me", {
+      const meRes = await fetch(`${API}/api/users/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!meRes.ok) return;
@@ -165,13 +167,13 @@ export default function HomePage() {
       setUserRole(role);
 
       // Fetch real loans for overdue/soon notifications (Bearer-Token, LoanController erfordert [Authorize])
-      const loanRes = await fetch("http://localhost:5099/api/loan", {
+      const loanRes = await fetch(`${API}/api/loan`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (loanRes.ok) setNotifLoans(await loanRes.json());
 
       // Eigene abgelehnte Taxonomie-Einreichungen
-      const mySubsRes = await fetch("http://localhost:5099/api/taxonomy/submissions/my", {
+      const mySubsRes = await fetch(`${API}/api/taxonomy/submissions/my`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (mySubsRes.ok) {
@@ -182,7 +184,7 @@ export default function HomePage() {
 
       // Pending taxonomy submissions (Moderator / Admin only)
       if (role === "Moderator" || role === "Admin") {
-        const taxRes = await fetch("http://localhost:5099/api/taxonomy/submissions/pending");
+        const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
         if (taxRes.ok) setPendingTax((await taxRes.json()).length);
       } else {
         setPendingTax(0);

@@ -5,7 +5,7 @@ import { useUser, useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/router';
 import Navbar from '../components/Navbar';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Seite: /moderator
