@@ -98,20 +98,25 @@ namespace TodoApi.Controllers
                         TaxonomyName = item.Taxonomy != null ? item.Taxonomy.Name : null,
                         TaxonomyRank = item.Taxonomy != null ? item.Taxonomy.Rank : null,
                         FindingLocation = item.FindingLocation != null ? item.FindingLocation.Name : null,
-                        // ältestes hochgeladenes Bild dient als Vorschaubild in der Sammlungsliste
+
                         ImageId = item.ObjectImages
-                            .OrderBy(img => img.CreatedAt)
+                            .OrderByDescending(img => img.CreatedAt)
                             .Select(img => (int?)img.Id)
                             .FirstOrDefault(),
 
 
                         ImageUrl = item.ObjectImages
-                            .OrderBy(img => img.CreatedAt)
+                            .OrderByDescending(img => img.CreatedAt)
                             .Select(img => img.ImageUrl)
                             .FirstOrDefault(),
-                        
+
+                        ImageCreatedAt = item.ObjectImages
+                            .OrderByDescending(img => img.CreatedAt)
+                            .Select(img => img.CreatedAt)
+                            .FirstOrDefault(),
+
                         ImageStoredInDatabase = item.ObjectImages
-                            .OrderBy(img => img.CreatedAt)
+                            .OrderByDescending(img => img.CreatedAt)
                             .Select(img => img.ImageData != null)
                             .FirstOrDefault(),
 

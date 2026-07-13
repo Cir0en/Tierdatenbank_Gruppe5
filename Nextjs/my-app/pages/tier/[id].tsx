@@ -301,7 +301,7 @@ export default function TierDetailPage() {
                     <div className="img-empty-box"><span>⏳</span></div>
                   ) : image ? (
                   <img
-                    src={resolveImageUrl(image.imageUrl)}
+                    src={`${resolveImageUrl(image.imageUrl)}?v=${encodeURIComponent(image.createdAt ?? '')}`}
                     alt={animal.name ?? ''}
                     className="img-main"
                   />

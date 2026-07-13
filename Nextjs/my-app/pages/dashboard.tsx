@@ -694,7 +694,7 @@ export default function DashboardPage() {
                         <tr key={s.id}>
                           <td><span className="td-id">{s.id}</span></td>
                           <td>
-                            <span className="td-name">{s.speciesName}</span>
+                            <span className="td-name">{s.name}</span>
                             <br />
                             <span style={{ fontSize: 9, color: "var(--text-lo)" }}>{s.taxon}</span>
                           </td>
