@@ -14,7 +14,7 @@ import { useRouter } from "next/router";
 import { useUser, useAuth } from "@clerk/nextjs";
 import { useLanguage } from "../contexts/LanguageContext";
 
-const API = "http://localhost:5099";
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // Statische Definition aller möglichen Navigationspunkte. `roles: null` bedeutet
 // für jeden sichtbar; ist ein Array gesetzt, wird der Punkt weiter unten anhand

@@ -16,6 +16,7 @@ public class CollectionItemDto
     /// <summary>Id des ältesten hochgeladenen Bildes (für /api/images/{id}/content); null wenn kein Bild vorhanden.</summary>
     public int? ImageId { get; set; }
     public string? ImageUrl { get; set; }
+    public DateTime? ImageCreatedAt { get; set; }
 
     /// <summary>True, wenn das Bild als Byte-Array in der DB liegt (ObjectImage.ImageData) statt nur als ImageUrl referenziert zu sein.</summary>
     public bool ImageStoredInDatabase { get; set; }

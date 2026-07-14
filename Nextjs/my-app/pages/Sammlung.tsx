@@ -44,6 +44,7 @@ interface CollectionItem {
   kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
+  imageCreatedAt: string | null;
   description: string | null;
   sex: string | null;
   ageClass: string | null;
@@ -114,7 +115,7 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/collections', {
+      const res = await fetch(`${API}/api/collections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
         body: JSON.stringify({ name: name.trim(), description: description.trim() || null, isPublic }),
@@ -192,7 +193,7 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
     if (!confirm(`Sammlung „${col.name}" wirklich löschen?`)) return;
     setDeleting(true);
     try {
-      await fetch(`http://localhost:5099/api/collections/${col.id}`, {
+      await fetch(`${API}/api/collections/${col.id}`, {
         method: 'DELETE',
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
@@ -228,7 +229,7 @@ function CollectionCard({ col, clerkUserId, onOpen, onDeleted }: {
 
 // ── Loan Animal Modal ─────────────────────────────────────────────────────────
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 function resolveImageUrl(imageUrl: string): string {
   if (
@@ -400,6 +401,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
   const [description, setDesc]      = useState('');
   const [findDate, setFindDate]     = useState('');
@@ -436,7 +438,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setGbifLoading(true);
     resetGbif();
     try {
-      const res = await fetch(`http://localhost:5099/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setGbifResult(await res.json());
     } catch (e: any) {
@@ -453,7 +455,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     setConfirming(true);
     setGbifError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/taxonomy/gbif/confirm', {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usageKey }),
@@ -474,15 +476,15 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   // taxonomyId aus dem GBIF-Workflow) im Backend. Leere/„Unbekannt"-Werte
   // werden bewusst als null statt als leerer String übergeben.
   const handleSave = async () => {
-    if (!name.trim()) { setError('Bitte einen Artnamen eingeben.'); return; }
+    if (!displayName.trim()) { setError('Bitte einen Namen eingeben.'); return; }
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/animals', {
+      const res = await fetch(`${API}/api/animals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name:         name.trim(),
+          name:         displayName.trim(),
           description:  description.trim() || null,
           findDate:     findDate || null,
           sex:          sex === 'Unbekannt' ? null : sex,
@@ -513,11 +515,20 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
         <div className="modal-title">🐾 Neues Tier hinzufügen</div>
         {error && <div className="modal-error">{error}</div>}
 
-        {/* Artname + GBIF-Suche */}
+        {/* Eigener Name/Bezeichnung des Eintrags */}
         <div className="form-group">
-          <label className="form-label">Artname <span className="required">*</span></label>
+          <label className="form-label">Name <span className="required">*</span></label>
+          <input type="text" className="form-input" autoFocus
+            placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)} />
+        </div>
+
+        {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
+        <div className="form-group">
+          <label className="form-label">Artname (Taxonomie-Suche)</label>
           <div className="gbif-search-row">
-            <input type="text" className="form-input" autoFocus
+            <input type="text" className="form-input"
               placeholder="z. B. Parnassius apollo"
               value={name}
               onChange={e => { setName(e.target.value); resetGbif(); }}
@@ -528,7 +539,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
               {gbifLoading ? '⏳' : '🔍 Suchen'}
             </button>
           </div>
-          <div className="gbif-hint">Artname eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
+          <div className="gbif-hint">Wissenschaftlichen Artnamen eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
         </div>
 
         {gbifError && <div className="modal-error">{gbifError}</div>}
@@ -740,7 +751,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                 <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
                   <img
-                    src={resolveImageUrl(item.imageUrl)}
+                    src={`${resolveImageUrl(item.imageUrl)}?v=${encodeURIComponent(item.imageCreatedAt ?? '')}`}
                     alt={item.name ?? ''}
                     className="animal-card-img"
                   />
@@ -881,10 +892,10 @@ export default function SammlungPage() {
       const token = await getToken();
       if (!token) { setBorrowedItems([]); return; }
       const authHeaders = { Authorization: `Bearer ${token}` };
-      const meRes = await fetch('http://localhost:5099/api/users/me', { headers: authHeaders });
+      const meRes = await fetch(`${API}/api/users/me`, { headers: authHeaders });
       if (!meRes.ok) { setBorrowedItems([]); return; }
       const me = await meRes.json();
-      const loansRes = await fetch('http://localhost:5099/api/loan', { headers: authHeaders });
+      const loansRes = await fetch(`${API}/api/loan`, { headers: authHeaders });
       if (!loansRes.ok) { setBorrowedItems([]); return; }
       const allLoans: any[] = await loansRes.json();
       setBorrowedItems(
@@ -919,7 +930,7 @@ export default function SammlungPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:5099/api/collections', {
+      const res = await fetch(`${API}/api/collections`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -941,7 +952,7 @@ export default function SammlungPage() {
     setDetailLoading(true);
     setDetail(null);
     try {
-      const res = await fetch(`http://localhost:5099/api/collections/${id}`, {
+      const res = await fetch(`${API}/api/collections/${id}`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

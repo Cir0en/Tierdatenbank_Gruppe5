@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../../components/Navbar';
 
-const API = 'http://localhost:5099';
+const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 
 function resolveImageUrl(imageUrl: string): string {
@@ -301,7 +301,7 @@ export default function TierDetailPage() {
                     <div className="img-empty-box"><span>⏳</span></div>
                   ) : image ? (
                   <img
-                    src={resolveImageUrl(image.imageUrl)}
+                    src={`${resolveImageUrl(image.imageUrl)}?v=${encodeURIComponent(image.createdAt ?? '')}`}
                     alt={animal.name ?? ''}
                     className="img-main"
                   />
