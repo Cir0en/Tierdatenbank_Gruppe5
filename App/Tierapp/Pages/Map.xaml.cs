@@ -20,9 +20,6 @@ public partial class Map : ContentPage
         MapWebView.Navigating += OnWebViewNavigating;
 
 #if ANDROID
-        // Der native Handler existiert im Konstruktor noch nicht - erst wenn
-        // der WebView an den Visual Tree angehängt wird. Deshalb hier auf
-        // HandlerChanged reagieren statt die Settings sofort zu setzen.
         MapWebView.HandlerChanged += OnMapWebViewHandlerChanged;
 #endif
     }
