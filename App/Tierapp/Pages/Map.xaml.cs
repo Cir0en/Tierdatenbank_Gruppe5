@@ -18,19 +18,27 @@ public partial class Map : ContentPage
         // 1. Events abonnieren
         MapWebView.Navigated += OnWebViewNavigated;
         MapWebView.Navigating += OnWebViewNavigating;
-#if ANDROID
-    var platformWebView = MapWebView.Handler?.PlatformView as Android.Webkit.WebView;
 
-    if (platformWebView != null)
+#if ANDROID
+        // Der native Handler existiert im Konstruktor noch nicht - erst wenn
+        // der WebView an den Visual Tree angehängt wird. Deshalb hier auf
+        // HandlerChanged reagieren statt die Settings sofort zu setzen.
+        MapWebView.HandlerChanged += OnMapWebViewHandlerChanged;
+#endif
+    }
+
+#if ANDROID
+    private void OnMapWebViewHandlerChanged(object sender, EventArgs e)
     {
-        platformWebView.Settings.JavaScriptEnabled = true;
-        platformWebView.Settings.DomStorageEnabled = true;
-        platformWebView.Settings.MixedContentMode = Android.Webkit.MixedContentHandling.CompatibilityMode;
-        platformWebView.SetLayerType(Android.Views.LayerType.Hardware, null);
+        if (MapWebView.Handler?.PlatformView is Android.Webkit.WebView platformWebView)
+        {
+            platformWebView.Settings.JavaScriptEnabled = true;
+            platformWebView.Settings.DomStorageEnabled = true;
+            platformWebView.Settings.MixedContentMode = Android.Webkit.MixedContentHandling.CompatibilityMode;
+            platformWebView.SetLayerType(Android.Views.LayerType.Hardware, null);
+        }
     }
 #endif
-
-    }
 
     protected override async void OnAppearing()
     {
