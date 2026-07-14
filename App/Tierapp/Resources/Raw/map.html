@@ -4,54 +4,49 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MapTiler MAUI</title>
-  <!-- KORREKTUR: Vollständige CDN-Pfade zum MapTiler SDK einbinden -->
-  <script src="https://maptiler.com"></script>
-  <link href="https://maptiler.com" rel="stylesheet" />
+  
+  <!-- MapLibre CDN - Garantiert stabil -->
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+
   <style>
-    body { margin: 0; padding: 0; }
-    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    body { margin: 0; padding: 0; height: 100vh; width: 100vw; }
+    #map { 
+        position: absolute; 
+        top: 0; 
+        bottom: 0; 
+        width: 100%; 
+        height: 100%; 
+        display: block;
+    }
   </style>
 </head>
 <body>
+  <h1 style="color: red; z-index: 9999; position: absolute;">HTML GELADEN!</h1>
   <div id="map"></div>
   <script>
   let map;
 
   function initializeMap(apiKey) {
-    // Falls das SDK im Netzwerk noch lädt, kurz warten und erneut versuchen
-    if (typeof maptilergl === 'undefined') {
-      setTimeout(() => initializeMap(apiKey), 200);
-      return;
-    }
+    if (!apiKey) return;
 
-    if (!apiKey) {
-      alert("Fehler: Kein MapTiler API-Key von C# übergeben!");
-      return;
-    }
+    // Gib dem WebView 500ms Zeit, das Layout/Grid zu berechnen
+    setTimeout(() => {
+        try {
+          const map = new maplibregl.Map({
+            container: 'map',
+            style: `https://api.maptiler.com/maps/streets-v2/style.json?key=${apiKey}`,
+            center: [11.0, 50.0],
+            zoom: 5
+          });
 
-    try {
-      maptilergl.config.apiKey = apiKey;
-      
-      map = new maptilergl.Map({
-        container: 'map',
-        style: maptilergl.MapStyle.STREETS,
-        center: [11.0, 50.0], // Startposition Lng, Lat
-        zoom: 5
-      });
-
-      // Marker hinzufügen
-      const marker = new maptilergl.Marker({ color: "#FF0000" })
-        .setLngLat([11.0, 50.0])
-        .addTo(map);
-
-      // C#-Interaktion bei Klick auslösen
-      marker.getElement().addEventListener('click', () => {
-        window.location.href = "maui://pinclick?name=MainLocation";
-      });
-      
-    } catch (error) {
-      alert("MapTiler JS Fehler: " + error.message);
-    }
+          map.on('load', () => {
+             console.log("Karte wurde geladen!");
+          });
+        } catch (error) {
+          console.error("Fehler: " + error.message);
+        }
+    }, 500); 
   }
 </script>
 </body>
