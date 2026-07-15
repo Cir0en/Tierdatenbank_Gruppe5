@@ -41,10 +41,8 @@ public partial class CollectItem
     /// <summary>Altersklasse des Tieres, falls bekannt (freier String, z.B. "adult"/"juvenil").</summary>
     public string? AgeClass { get; set; }
 
-    // Kategorie + Lebensraum: [NotMapped], da die zugehörigen DB-Spalten noch nicht per ALTER TABLE
-    // angelegt wurden. Werte werden aktuell nicht persistiert, nur zur Laufzeit gehalten.
-    [NotMapped] public string? Kategorie { get; set; }
-
+    // Lebensraum: [NotMapped], da die zugehörige DB-Spalte noch nicht per ALTER TABLE angelegt
+    // wurde. Wert wird aktuell nicht persistiert, nur zur Laufzeit gehalten.
     [NotMapped] public string? Lebensraum { get; set; }
 
     public decimal? BodyMassGram { get; set; }

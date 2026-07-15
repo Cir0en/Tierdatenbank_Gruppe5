@@ -19,6 +19,5 @@ public class CreateMapAnimalDto
 
     public string? Description { get; set; }
     public string? Status { get; set; }
-    public string? Kategorie { get; set; }
     public string? Lebensraum { get; set; }
 }

@@ -41,7 +41,6 @@ interface CollectionItem {
   taxonomyName: string | null;
   taxonomyRank: string | null;
   findingLocation: string | null;
-  kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
   imageCreatedAt: string | null;
@@ -70,7 +69,6 @@ interface BorrowedItem {
 }
 
 const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
-const KATEGORIE_OPTIONS  = ['Insekten', 'Säugetiere', 'Vögel', 'Amphibien', 'Reptilien', 'Fische', 'Spinnentiere', 'Schnecken', 'Sonstige'];
 
 interface CollectionDetail extends Collection {
   items: CollectionItem[];
@@ -412,7 +410,6 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   const [bodyMass, setBodyMass]     = useState('');
   const [bodyLen, setBodyLen]       = useState('');
   const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
-  const [kategorie, setKategorie]   = useState('');
   const [lebensraum, setLebensraum] = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
@@ -497,7 +494,6 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           taxonomyId:   taxonomyId,
-          kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           status:       seltenheit || null,
           collectionId,
@@ -608,21 +604,12 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             value={description} onChange={e => setDesc(e.target.value)} />
         </div>
 
-        <div className="form-row-2">
-          <div className="form-group">
-            <label className="form-label">Tier-Kategorie</label>
-            <select className="form-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Seltenheit</label>
-            <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+        <div className="form-group">
+          <label className="form-label">Seltenheit</label>
+          <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+            <option value="">— nicht angegeben —</option>
+            {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
 
         <div className="form-row-2">
@@ -657,7 +644,7 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             <label className="form-label">Altersklasse</label>
             <select className="form-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
               <option value="">— nicht angegeben —</option>
-              <option value="Juvenile">Juvenil</option>
+              <option value="Juvenil">Juvenil</option>
               <option value="Subadult">Subadult</option>
               <option value="Adult">Adult</option>
               <option value="Senior">Senior</option>
@@ -805,10 +792,8 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                   )}
 
                   <div className="animal-card-meta">
-                    {(item.kategorie || item.taxonomyRank) && (
-                      <span className="animal-card-cat">
-                        {item.kategorie ?? item.taxonomyRank}
-                      </span>
+                    {item.taxonomyRank && (
+                      <span className="animal-card-cat">{item.taxonomyRank}</span>
                     )}
                     {item.lebensraum && (
                       <span className="animal-card-cat">{item.lebensraum}</span>

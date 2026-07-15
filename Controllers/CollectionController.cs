@@ -96,7 +96,6 @@ namespace TodoApi.Controllers
                         Name = item.Name,
                         FindDate = item.FindDate,
                         Status = item.Status,
-                        Kategorie = item.Kategorie,
                         Lebensraum = item.Lebensraum,
                         TaxonomyName = item.Taxonomy != null ? item.Taxonomy.Name : null,
                         TaxonomyRank = item.Taxonomy != null ? item.Taxonomy.Rank : null,
