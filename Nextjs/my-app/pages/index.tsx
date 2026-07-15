@@ -430,13 +430,6 @@ export default function HomePage() {
         .tbl tr:last-child td { border-bottom: none; }
         .td-name { color: var(--text-hi); font-style: italic; }
         .td-id { color: var(--text-lo); font-size: 10px; }
-        .td-actions { display: flex; gap: 6px; }
-        .tbl-btn {
-          font-size: 9px; letter-spacing: 0.06em; background: none;
-          border: 1px solid var(--border); border-radius: 2px; padding: 2px 7px;
-          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono); transition: all 0.15s;
-        }
-        .tbl-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
 
         /* ── Pills ── */
         .pill {
@@ -677,14 +670,12 @@ export default function HomePage() {
                         <th>Fundort</th>
                         <th>Datum</th>
                         <th>Status</th>
-                        {/* Aktionen-Spalte nur für eingeloggte Nutzer */}
-                        {isSignedIn && <th></th>}
                       </tr>
                     </thead>
                     <tbody>
                       {filteredSpecimens.length === 0 && (
                         <tr>
-                          <td colSpan={isSignedIn ? 6 : 5} style={{ textAlign: "center", padding: "20px 12px", color: "var(--text-lo)" }}>
+                          <td colSpan={5} style={{ textAlign: "center", padding: "20px 12px", color: "var(--text-lo)" }}>
                             Keine Objekte für „{search}" gefunden.
                           </td>
                         </tr>
@@ -700,15 +691,6 @@ export default function HomePage() {
                           <td>{s.fundort}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{formatDate(s.findDate)}</td>
                           <td><StatusPill status={s.status} /></td>
-                          {/* Edit/Karte-Buttons nur für authentifizierte Nutzer */}
-                          {isSignedIn && (
-                            <td>
-                              <div className="td-actions">
-                                <button className="tbl-btn">Edit</button>
-                                <button className="tbl-btn">Karte</button>
-                              </div>
-                            </td>
-                          )}
                         </tr>
                       ))}
                     </tbody>
