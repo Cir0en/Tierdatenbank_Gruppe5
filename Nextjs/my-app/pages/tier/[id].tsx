@@ -286,7 +286,17 @@ export default function TierDetailPage() {
         <Navbar activeNav="tierliste" />
 
         <main className="main-content">
-          <button className="back-btn" onClick={() => router.back()}>← Zurück</button>
+          <button className="back-btn" onClick={() => {
+            // Kam der Nutzer über eine Sammlung hierher (siehe Sammlung.tsx), führt
+            // "Zurück" gezielt wieder in dieselbe Sammlung statt nur zur Übersicht,
+            // da /Sammlung selbst kein eigenes Routing für die Detailansicht hat.
+            const fromCollection = router.query.fromCollection;
+            if (fromCollection) {
+              router.push(`/Sammlung?collection=${fromCollection}`);
+            } else {
+              router.back();
+            }
+          }}>← Zurück</button>
 
           {loading && <div className="status-msg">Wird geladen…</div>}
           {error   && <div className="error-box">⚠️ {error}</div>}
@@ -387,7 +397,7 @@ export default function TierDetailPage() {
                 {animal.collection && (
                   <div>
                     <div className="section-title">Sammlung</div>
-                    <a className="collection-link" href="/Sammlung">
+                    <a className="collection-link" href={`/Sammlung?collection=${animal.collection.id}`}>
                       📂 {animal.collection.name}
                     </a>
                   </div>

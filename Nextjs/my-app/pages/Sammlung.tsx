@@ -759,7 +759,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           {detail.items.map(item => {
             const badge = statusBadge(item.status);
             return (
-              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}`)}>
+              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}?fromCollection=${detail.id}`)}>
                 {item.canDelete && (
                   <button className="animal-delete-btn" disabled={deletingId === item.id}
                     onClick={e => handleDeleteAnimal(e, item)} title="Tier löschen">
@@ -873,8 +873,11 @@ type Tab = 'public' | 'mine' | 'borrowed';
 // Hauptkomponente der Seite /Sammlung. Verwaltet sowohl die Grid-Übersicht
 // (mit Tabs "Öffentlich" / "Meine Sammlungen" und Volltextsuche über den Namen)
 // als auch die Detailansicht (siehe CollectionDetailView), zwischen denen über
-// den lokalen `detail`-State umgeschaltet wird (kein eigenes Routing/URL-Wechsel).
+// den lokalen `detail`-State umgeschaltet wird. Die geöffnete Sammlung wird per
+// ?collection=<id> in der URL gespiegelt (shallow routing), damit ein Zurück-
+// navigieren von der Tier-Detailseite wieder dieselbe Sammlung öffnet.
 export default function SammlungPage() {
+  const router = useRouter();
   const { user } = useUser();
   const { isSignedIn, getToken } = useAuth();
   // clerkUserId wird bei jeder Sammlungs-/Objekt-API-Anfrage als
@@ -965,10 +968,16 @@ export default function SammlungPage() {
   useEffect(() => { load(); }, [load]);
 
   // Lädt die Detaildaten (inkl. aller enthaltenen Tier-Einträge) einer
-  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um.
+  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um. Spiegelt
+  // die geöffnete Sammlung zusätzlich per Query-Parameter in der URL, damit ein
+  // Zurücknavigieren (z.B. von der Tier-Detailseite) wieder in derselben
+  // Sammlung landet statt in der Übersicht (siehe onBack unten).
   const openCollection = async (id: number) => {
     setDetailLoading(true);
     setDetail(null);
+    if (router.query.collection !== String(id)) {
+      router.push({ pathname: '/Sammlung', query: { collection: id } }, undefined, { shallow: true });
+    }
     try {
       const res = await fetch(`${API}/api/collections/${id}`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
@@ -981,6 +990,17 @@ export default function SammlungPage() {
       setDetailLoading(false);
     }
   };
+
+  // Öffnet beim (Wieder-)Laden der Seite automatisch die Sammlung aus dem
+  // Query-Parameter, z.B. nach dem Zurücknavigieren von /tier/[id].
+  useEffect(() => {
+    if (!router.isReady) return;
+    const collectionId = parseInt(router.query.collection as string, 10);
+    if (!isNaN(collectionId) && detail?.id !== collectionId) {
+      openCollection(collectionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.collection]);
 
   // Callback nach erfolgreichem Anlegen einer Sammlung: Modal schließen und
   // Liste neu laden, damit die neue Sammlung sofort sichtbar ist.
@@ -1338,7 +1358,10 @@ export default function SammlungPage() {
               </div>
               <CollectionDetailView
                 detail={detail}
-                onBack={() => setDetail(null)}
+                onBack={() => {
+                  setDetail(null);
+                  router.push('/Sammlung', undefined, { shallow: true });
+                }}
                 onAnimalAdded={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
                 clerkUserId={clerkUserId}
