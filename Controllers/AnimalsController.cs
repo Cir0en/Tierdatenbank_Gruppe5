@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using TodoApi.DTOs;
+using TodoApi.Services;
 
 // später adden: normale Nutzer dürfen Funde nur in eigenen Collections anlegen oder ändern
 
@@ -20,10 +21,12 @@ namespace TodoApi.Controllers
     public class AnimalsController : ControllerBase
     {
         private readonly NeondbContext _context;
+        private readonly ClerkUserProvisioningService _userProvisioning;
 
-        public AnimalsController(NeondbContext context)
+        public AnimalsController(NeondbContext context, ClerkUserProvisioningService userProvisioning)
         {
             _context = context;
+            _userProvisioning = userProvisioning;
         }
 
         // GET /api/animals — liefert alle Fundobjekte ohne Filterung/Includes (roh, für einfache Listen)
@@ -284,7 +287,8 @@ namespace TodoApi.Controllers
                     Taxonomy = taxonomy,
                     Collection = collection,
                     FindingLocation = location,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedByUserId = importer.Id
                 };
 
                 _context.CollectItems.Add(item);
@@ -362,8 +366,12 @@ namespace TodoApi.Controllers
         //FindDate = c.FindDate.HasValue ? c.FindDate.Value.ToDateTime(TimeOnly.MinValue).ToString("yyyy-MM-dd") : null
         // POST /api/animals — legt ein Fundobjekt direkt aus dem übergebenen Entity-Objekt an (ohne Validierung/DTO)
         [HttpPost]
+        [AllowAnonymous]
         public async Task<ActionResult<CollectItem>> CreateAnimal(CollectItem item)
         {
+            var currentUser = await GetCurrentUserAsync();
+            item.CreatedByUserId = currentUser?.Id;
+
             _context.CollectItems.Add(item);
             await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
@@ -372,8 +380,11 @@ namespace TodoApi.Controllers
         // POST /api/animals/map — legt ein Fundobjekt über die Kartenansicht an: validiert Koordinaten
         // und Fremdschlüssel (Collection/Taxonomy) und erstellt bei Bedarf einen neuen Fundort (GeoLocation).
         [HttpPost("map")]
+        [AllowAnonymous]
         public async Task<ActionResult<CollectItem>> CreateMapAnimal(CreateMapAnimalDto dto)
         {
+            var currentUser = await GetCurrentUserAsync();
+
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
                 return BadRequest("Name Artname fehlt");
@@ -448,12 +459,68 @@ namespace TodoApi.Controllers
                 Description = dto.Description,
                 // Ohne explizite Statusangabe startet jedes neue Fundobjekt als "ausstehend" (Moderationsworkflow)
                 Status = string.IsNullOrWhiteSpace(dto.Status) ? "ausstehend" : dto.Status,
+                CreatedByUserId = currentUser?.Id,
             };
 
             _context.CollectItems.Add(item);
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
+        }
+
+        // DELETE /api/animals/{id} — löscht ein einzelnes Fundobjekt (samt abhängiger Bilder/Ausleihen
+        // per DB-Cascade); nur Admin/Moderator oder der Nutzer, der den Eintrag angelegt hat, dürfen löschen.
+        [HttpDelete("{id}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> DeleteAnimal(int id)
+        {
+            var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
+
+            var item = await _context.CollectItems.FindAsync(id);
+            if (item == null)
+            {
+                return NotFound();
+            }
+
+            var isModerator = currentUser.Role == "Admin" || currentUser.Role == "Moderator";
+            var isCreator = item.CreatedByUserId.HasValue && item.CreatedByUserId == currentUser.Id;
+
+            if (!isModerator && !isCreator)
+            {
+                return Forbid();
+            }
+
+            _context.CollectItems.Remove(item);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        // Ermittelt den aktuell angemeldeten Nutzer aus dem Request (Clerk-Header oder JWT sub-Claim);
+        // gibt null zurück, wenn kein Nutzer identifiziert werden kann (z.B. bei anonymen Anfragen).
+        private async Task<User?> GetCurrentUserAsync()
+        {
+            var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(clerkId))
+                clerkId = User.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrWhiteSpace(clerkId))
+                return null;
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.ClerkId == clerkId);
+            if (user != null)
+                return user;
+
+            // Normalerweise legt der Clerk-Webhook (ClerkWebhookController) den Nutzer bei der
+            // Registrierung an; ist der Webhook nicht erreichbar (z.B. lokale Entwicklung ohne
+            // gültigen Tunnel), fehlt der Nutzer hier sonst dauerhaft. Fallback: direkt bei Clerk nachschlagen.
+            return await _userProvisioning.ProvisionFromClerkAsync(clerkId);
         }
     }
 }

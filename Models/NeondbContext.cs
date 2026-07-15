@@ -82,6 +82,13 @@ public partial class NeondbContext : DbContext
                 .HasForeignKey(d => d.TaxonomyId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("collect_items_taxonomy_id_fkey");
+
+            entity.Property(e => e.CreatedByUserId).HasColumnName("created_by_user_id");
+
+            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.CreatedCollectItems)
+                .HasForeignKey(d => d.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("collect_items_created_by_user_id_fkey");
         });
 
         // Löschen des Besitzer-Users löscht auch dessen Sammlungen (Cascade).

@@ -99,6 +99,8 @@ builder.Services.AddHttpClient("Clerk", client =>
             clerkSecretKey);
 });
 
+builder.Services.AddScoped<TodoApi.Services.ClerkUserProvisioningService>();
+
 //Notification OneSignal HttpClient
 var oneSignalAppId = builder.Configuration["OneSignal:AppId"];
 var oneSignalApiKey = builder.Configuration["OneSignal:ApiKey"];

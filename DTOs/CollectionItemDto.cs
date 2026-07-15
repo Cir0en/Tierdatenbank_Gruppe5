@@ -34,4 +34,7 @@ public class CollectionItemDto
 
     /// <summary>Vereinbartes Rückgabedatum der offenen Ausleihe; nur für Eigentümer/Moderation gefüllt, sonst null.</summary>
     public DateOnly? LoanReturnDate { get; set; }
+
+    /// <summary>True, wenn der aktuelle Nutzer dieses Tier löschen darf (Admin/Moderator oder Ersteller).</summary>
+    public bool CanDelete { get; set; }
 }

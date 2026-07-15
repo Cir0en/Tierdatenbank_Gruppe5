@@ -53,6 +53,7 @@ interface CollectionItem {
   isOnLoan: boolean;
   loanedToUsername: string | null;
   loanReturnDate: string | null;
+  canDelete: boolean;
 }
 
 interface BorrowedItem {
@@ -396,8 +397,9 @@ type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
 // zusätzlich den GBIF-Workflow: der Nutzer gibt einen Artnamen ein, sucht
 // gegen die GBIF-Datenbank und übernimmt (bestätigt) einen Treffer, wodurch
 // eine taxonomyId für das Tier gesetzt wird.
-function AddAnimalModal({ collectionId, onClose, onSaved }: {
+function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   collectionId: number;
+  clerkUserId: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -482,7 +484,10 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     try {
       const res = await fetch(`${API}/api/animals`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {}),
+        },
         body: JSON.stringify({
           name:         displayName.trim(),
           description:  description.trim() || null,
@@ -699,6 +704,27 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
   const [showAddModal, setShowAddModal]     = useState(false);
   const [loanItem, setLoanItem]             = useState<CollectionItem | null>(null);
   const [loanSuccess, setLoanSuccess]       = useState<string | null>(null);
+  const [deletingId, setDeletingId]         = useState<number | null>(null);
+
+  // Löscht ein einzelnes Tier aus der Sammlung nach Bestätigungsdialog. Nur für
+  // Admin/Moderator oder den Ersteller des Eintrags sichtbar (item.canDelete, siehe Backend).
+  const handleDeleteAnimal = async (e: React.MouseEvent, item: CollectionItem) => {
+    e.stopPropagation();
+    if (!confirm(`„${item.name ?? `Eintrag #${item.id}`}" wirklich löschen?`)) return;
+    setDeletingId(item.id);
+    try {
+      const res = await fetch(`${API}/api/animals/${item.id}`, {
+        method: 'DELETE',
+        headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      onAnimalAdded();
+    } catch (err: any) {
+      alert(err.message ?? 'Löschen fehlgeschlagen.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div>
@@ -747,6 +773,12 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
             const badge = statusBadge(item.status);
             return (
               <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}`)}>
+                {item.canDelete && (
+                  <button className="animal-delete-btn" disabled={deletingId === item.id}
+                    onClick={e => handleDeleteAnimal(e, item)} title="Tier löschen">
+                    {deletingId === item.id ? '…' : '🗑'}
+                  </button>
+                )}
                 {/* Foto */}
                 <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
@@ -826,6 +858,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
       {showAddModal && (
         <AddAnimalModal
           collectionId={detail.id}
+          clerkUserId={clerkUserId}
           onClose={() => setShowAddModal(false)}
           onSaved={() => { setShowAddModal(false); onAnimalAdded(); }}
         />
@@ -1062,12 +1095,15 @@ export default function SammlungPage() {
         .col-meta-item { font-size: 11px; color: #9ca3af; }
 
         .col-delete-btn {
-          position: absolute; top: 10px; right: 10px;
-          background: none; border: none; cursor: pointer; font-size: 15px;
-          opacity: 0; transition: opacity .15s; padding: 2px 4px; border-radius: 4px;
+          position: absolute; top: 10px; right: 10px; z-index: 1;
+          display: flex; align-items: center; justify-content: center;
+          width: 28px; height: 28px;
+          background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 8px;
+          color: #b91c1c; cursor: pointer; font-size: 14px;
+          transition: background .15s, border-color .15s, transform .15s;
         }
-        .col-card:hover .col-delete-btn { opacity: 1; }
-        .col-delete-btn:hover { background: #fee2e2; }
+        .col-delete-btn:hover { background: #fecaca; border-color: #f87171; transform: scale(1.06); }
+        .col-delete-btn:disabled { opacity: .6; cursor: not-allowed; }
 
         /* ── Detail view ── */
         .detail-header {
@@ -1193,9 +1229,21 @@ export default function SammlungPage() {
         .animal-card {
           border-radius: 14px; border: 1px solid #e5e7eb; background: #fff;
           overflow: hidden; transition: box-shadow .2s, transform .2s;
-          display: flex; flex-direction: column;
+          display: flex; flex-direction: column; position: relative; cursor: pointer;
         }
         .animal-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.1); transform: translateY(-3px); }
+
+        .animal-delete-btn {
+          position: absolute; top: 8px; right: 8px; z-index: 1;
+          display: flex; align-items: center; justify-content: center;
+          width: 30px; height: 30px;
+          background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 8px;
+          color: #b91c1c; cursor: pointer; font-size: 14px;
+          box-shadow: 0 1px 4px rgba(0,0,0,.12);
+          transition: background .15s, border-color .15s, transform .15s;
+        }
+        .animal-delete-btn:hover { background: #fecaca; border-color: #f87171; transform: scale(1.06); }
+        .animal-delete-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
 
         .animal-card-img-wrap {
           width: 100%; height: 180px; cursor: pointer; overflow: hidden;

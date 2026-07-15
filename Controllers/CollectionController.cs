@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using TodoApi.DTOs;
+using TodoApi.Services;
 using Microsoft.AspNetCore.Authorization;
 
 namespace TodoApi.Controllers
@@ -18,10 +19,12 @@ namespace TodoApi.Controllers
     public class CollectionController : ControllerBase
     {
         private readonly NeondbContext _context;
+        private readonly ClerkUserProvisioningService _userProvisioning;
 
-        public CollectionController(NeondbContext context)
+        public CollectionController(NeondbContext context, ClerkUserProvisioningService userProvisioning)
         {
             _context = context;
+            _userProvisioning = userProvisioning;
         }
 
         // GET /api/collections — listet alle für den aktuellen Nutzer sichtbaren Sammlungen:
@@ -136,6 +139,10 @@ namespace TodoApi.Controllers
                         LoanReturnDate = (currentUser != null && (c.UserId == currentUser.Id || canModerate))
                             ? item.Loans.Where(l => l.Status == "offen").Select(l => l.EndDate).FirstOrDefault()
                             : null,
+
+                        // Löschrecht für ein einzelnes Tier: Admin/Moderator oder der Nutzer, der es angelegt hat
+                        // (siehe AnimalsController.DeleteAnimal) — bewusst unabhängig vom Sammlungs-Eigentümer.
+                        CanDelete = currentUser != null && (canModerate || item.CreatedByUserId == currentUser.Id),
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();
@@ -276,8 +283,15 @@ namespace TodoApi.Controllers
             if (string.IsNullOrWhiteSpace(clerkId))
                 return null;
 
-            return await _context.Users
+            var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.ClerkId == clerkId);
+            if (user != null)
+                return user;
+
+            // Normalerweise legt der Clerk-Webhook (ClerkWebhookController) den Nutzer bei der
+            // Registrierung an; ist der Webhook nicht erreichbar (z.B. lokale Entwicklung ohne
+            // gültigen Tunnel), fehlt der Nutzer hier sonst dauerhaft. Fallback: direkt bei Clerk nachschlagen.
+            return await _userProvisioning.ProvisionFromClerkAsync(clerkId);
         }
 
         // Bearbeitungsrecht: Eigentümer der Sammlung oder ein Nutzer mit Moderationsrechten (Admin/Moderator)

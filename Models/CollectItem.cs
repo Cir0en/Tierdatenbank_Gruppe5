@@ -51,6 +51,9 @@ public partial class CollectItem
 
     public decimal? BodyLengthMm { get; set; }
 
+    /// <summary>Nutzer, der diesen Eintrag angelegt hat (falls beim Anlegen identifizierbar); Basis für die Lösch-Berechtigung.</summary>
+    public int? CreatedByUserId { get; set; }
+
     public virtual Collection? Collection { get; set; }
 
     public virtual GeoLocation? FindingLocation { get; set; }
@@ -60,4 +63,6 @@ public partial class CollectItem
     public virtual ICollection<ObjectImage> ObjectImages { get; set; } = new List<ObjectImage>();
 
     public virtual Taxonomy? Taxonomy { get; set; }
+
+    public virtual User? CreatedByUser { get; set; }
 }
