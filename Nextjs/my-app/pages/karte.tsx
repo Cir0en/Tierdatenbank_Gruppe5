@@ -60,11 +60,12 @@ interface MapItem {
 // des Nutzers nach, damit das neue Tier optional direkt einer Sammlung zugeordnet
 // werden kann. Die Felder entsprechen exakt dem Formular zum Hinzufügen eines
 // Tiers zu einer Sammlung (AddAnimalModal in Sammlung.tsx), inkl. GBIF-Workflow.
-function TierFormPanel({ coords, userId, onClose, onSaved }: {
+function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   coords: { lng: number; lat: number };
+  locationName: string | null;
   userId: string | null | undefined;
   onClose: () => void;
-  onSaved: (name: string, sex: string, id: number) => void;
+  onSaved: (name: string, sex: string, id: number, locationName: string) => void;
 }) {
   const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
@@ -169,6 +170,7 @@ function TierFormPanel({ coords, userId, onClose, onSaved }: {
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           latitude:     coords.lat,
           longitude:    coords.lng,
+          locationName: locationName,
           description:  description.trim() || null,
           status:       seltenheit || null,
           lebensraum:   lebensraum.trim() || null,
@@ -179,7 +181,7 @@ function TierFormPanel({ coords, userId, onClose, onSaved }: {
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       const saved = await res.json();
-      onSaved(displayName.trim(), sex, saved.id);
+      onSaved(displayName.trim(), sex, saved.id, locationName ?? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
     } catch (err: any) {
       setError(err.message);
       setSaving(false);
@@ -380,6 +382,23 @@ function TierFormPanel({ coords, userId, onClose, onSaved }: {
   );
 }
 
+// ── Hilfsfunktion für Reverse Geocoding  ────────────────────────────────────────────────────────────────
+
+async function reverseGeocode(lng: number, lat: number): Promise<string> {
+  const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const url =
+    `https://api.maptiler.com/geocoding/${lng},${lat}.json` +
+    `?key=${key}&language=de&limit=1`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Adresse konnte nicht ermittelt werden');
+
+  const data = await res.json();
+  return data.features?.[0]?.place_name_de
+    ?? data.features?.[0]?.place_name
+    ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
 // ── Hauptseite ────────────────────────────────────────────────────────────────
 
 export default function MapPage() {
@@ -411,6 +430,8 @@ export default function MapPage() {
   const [items, setItems]           = useState<MapItem[]>([]);
   const [search, setSearch]         = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [formLocationName, setFormLocationName] = useState<string | null>(null);
+  const [geoResults, setGeoResults] = useState<any[]>([]);
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -419,6 +440,28 @@ export default function MapPage() {
       .filter(it => (it.itemName ?? '').toLowerCase().includes(q) || it.locationName.toLowerCase().includes(q))
       .slice(0, 8);
   }, [search, items]);
+
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 3) { setGeoResults([]); return; }
+
+    const timeout = setTimeout(async () => {
+      try {
+        const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+        const url = `https://api.maptiler.com/geocoding/${encodeURIComponent(q)}.json?key=${key}&language=de&limit=5&autocomplete=true`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setGeoResults(data.features ?? []);
+      }
+      catch {
+        setGeoResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [search]);
 
   // Springt zur Position eines Suchtreffers und öffnet dessen Popup.
   const flyToItem = (it: MapItem) => {
@@ -439,6 +482,17 @@ export default function MapPage() {
     setSearchOpen(false);
   };
 
+  const flyToGeoResult = (res: any) => {
+    const map = mapInstance.current;
+    if (!map || !res.center) return;
+
+    const [lng, lat] = res.center;
+    map.flyTo({ center: [lng, lat], zoom: 14 });
+    setSearch('');
+    setSearchOpen(false);
+  }
+
+
   // Ref-Callback: map-click → React-State (kein Re-Render-Problem)
   const openFormRef = useRef<((lng: number, lat: number) => void) | null>(null);
   openFormRef.current = (lng, lat) => {
@@ -447,7 +501,9 @@ export default function MapPage() {
   };
 
   // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
-  const addMarkerRef = useRef<((name: string, sex: string, id: number, lng: number, lat: number) => void) | null>(null);
+  const addMarkerRef = useRef < ((name: string,
+    sex: string, id: number,
+    lng: number, lat: number, locationName: string) => void) | null>(null);
 
   // Initialisiert die MapTiler-Karte genau einmal (sobald der Container im DOM
   // ist und die Next.js-Route/-Query bereit ist) und registriert alle
@@ -496,21 +552,21 @@ export default function MapPage() {
     };
 
     // Marker nach dem Speichern setzen (via Ref aus React erreichbar)
-    addMarkerRef.current = (name, sex, id, lng, lat) => {
+    addMarkerRef.current = (name, sex, id, lng, lat, locationName) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
       el.addEventListener('click', () => { window.location.href = `/tier/${id}`; });
       const marker = new Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
       markersRef.current.set(id, marker);
       setItems(prev => [
         ...prev,
-        { itemId: id, itemName: name, locationName: name, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex },
+        { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex },
       ]);
     };
 
     // ── Klick auf Karte ──────────────────────────────────────────────────
     // Nicht angemeldete Nutzer erhalten stattdessen einen Hinweis-Popup mit
     // Login-Link; angemeldete Nutzer öffnen über openFormRef das Erfassungs-Panel.
-    map.on('click', (e) => {
+    map.on('click', async (e) => {
       const { lng, lat } = e.lngLat;
 
       if (!isSignedInRef.current) {
@@ -525,6 +581,14 @@ export default function MapPage() {
           `)
           .addTo(map);
         return;
+      }
+
+
+      try {
+        const address = await reverseGeocode(lng, lat);
+        setFormLocationName(address);
+      } catch {
+        setFormLocationName(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
       }
 
       openFormRef.current?.(lng, lat);
@@ -605,20 +669,50 @@ export default function MapPage() {
 
           {searchOpen && search.trim() !== '' && (
             <div className="map-search-results" onMouseDown={e => e.preventDefault()}>
-              {searchResults.length === 0 ? (
+              {searchResults.length === 0 && geoResults.length === 0 ? (
                 <div className="map-search-empty">Keine Treffer für „{search}“</div>
               ) : (
-                searchResults.map(it => (
-                  <div key={it.itemId} className="map-search-result" onClick={() => flyToItem(it)}>
-                    <span className="map-search-result-icon">
-                      {it.sex === 'Männlich' ? '♂' : it.sex === 'Weiblich' ? '♀' : '◉'}
-                    </span>
-                    <div className="map-search-result-text">
-                      <div className="map-search-result-name">{it.itemName ?? it.locationName}</div>
-                      <div className="map-search-result-loc">{it.locationName}</div>
+                 <>
+                  {searchResults.map(it => (
+                    <div
+                      key={`item-${it.itemId}`}
+                      className="map-search-result"
+                      onClick={() => flyToItem(it)}
+                    >
+                      <span className="map-search-result-icon">
+                        {it.sex === 'Männlich' ? '♂' : it.sex === 'Weiblich' ? '♀' : '◉'}
+                      </span>
+
+                      <div className="map-search-result-text">
+                        <div className="map-search-result-name">
+                          {it.itemName ?? it.locationName}
+                        </div>
+                        <div className="map-search-result-loc">
+                          {it.locationName}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+
+                  {geoResults.map(feature => (
+                    <div
+                      key={`geo-${feature.id}`}
+                      className="map-search-result"
+                      onClick={() => flyToGeoResult(feature)}
+                    >
+                      <span className="map-search-result-icon">⌖</span>
+
+                      <div className="map-search-result-text">
+                        <div className="map-search-result-name">
+                          {feature.text_de ?? feature.text ?? 'Ort'}
+                        </div>
+                        <div className="map-search-result-loc">
+                          {feature.place_name_de ?? feature.place_name ?? ''}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           )}
@@ -632,10 +726,11 @@ export default function MapPage() {
         {formOpen && formCoords && (
           <TierFormPanel
             coords={formCoords}
+            locationName={formLocationName}
             userId={userId}
             onClose={() => setFormOpen(false)}
-            onSaved={(name, sex, id) => {
-              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat);
+            onSaved={(name, sex, id, locationName) => {
+              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat, locationName);
               setFormOpen(false);
             }}
           />
