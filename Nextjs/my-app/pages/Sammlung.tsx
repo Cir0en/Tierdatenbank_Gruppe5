@@ -419,6 +419,9 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   const [bodyLen, setBodyLen]       = useState('');
   const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
   const [lebensraum, setLebensraum] = useState('');
+  const [showCoords, setShowCoords] = useState(false);
+  const [latitude, setLatitude]     = useState('');
+  const [longitude, setLongitude]   = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
@@ -484,6 +487,22 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   // werden bewusst als null statt als leerer String übergeben.
   const handleSave = async () => {
     if (!displayName.trim()) { setError('Bitte einen Namen eingeben.'); return; }
+
+    const lat = showCoords && latitude.trim()  ? parseFloat(latitude)  : null;
+    const lng = showCoords && longitude.trim() ? parseFloat(longitude) : null;
+    if (showCoords && ((lat === null) !== (lng === null))) {
+      setError('Bitte Breiten- und Längengrad zusammen eingeben (oder beide leer lassen).');
+      return;
+    }
+    if (lat !== null && (isNaN(lat) || lat < -90 || lat > 90)) {
+      setError('Breitengrad muss zwischen -90 und 90 liegen.');
+      return;
+    }
+    if (lng !== null && (isNaN(lng) || lng < -180 || lng > 180)) {
+      setError('Längengrad muss zwischen -180 und 180 liegen.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -504,6 +523,8 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
           taxonomyId:   taxonomyId,
           lebensraum:   lebensraum.trim() || null,
           status:       seltenheit || null,
+          latitude:     lat,
+          longitude:    lng,
           collectionId,
         }),
       });
@@ -632,6 +653,31 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             <input type="date" className="form-input"
               value={findDate} onChange={e => setFindDate(e.target.value)} />
           </div>
+        </div>
+
+        <div className="form-group">
+          <label className="checkbox-label">
+            <input type="checkbox" checked={showCoords}
+              onChange={e => setShowCoords(e.target.checked)} />
+            Koordinaten manuell eingeben (statt über die Kartenansicht)
+          </label>
+          {showCoords && (
+            <div className="form-row-2" style={{ marginTop: 10 }}>
+              <div className="form-group">
+                <label className="form-label">Breitengrad</label>
+                <input type="number" step="any" min="-90" max="90" className="form-input"
+                  placeholder="z. B. 50.9411"
+                  value={latitude} onChange={e => setLatitude(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Längengrad</label>
+                <input type="number" step="any" min="-180" max="180" className="form-input"
+                  placeholder="z. B. 8.0020"
+                  value={longitude} onChange={e => setLongitude(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <div className="gbif-hint">Wird ein Fundort mit Koordinaten angegeben, erscheint das Tier zusätzlich auf der Kartenansicht.</div>
         </div>
 
         <div className="form-group">
@@ -1190,6 +1236,12 @@ export default function SammlungPage() {
           background: #fff; cursor: pointer; transition: border-color .2s, box-shadow .2s;
         }
         .form-select:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+
+        .checkbox-label {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 13px; color: #374151; cursor: pointer; user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2d6a4f; }
 
         .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
         .radio-label {
