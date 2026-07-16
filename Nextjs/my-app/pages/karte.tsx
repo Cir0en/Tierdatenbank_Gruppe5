@@ -83,7 +83,9 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [nameErr, setNameErr]       = useState(false);
+  const [collectionErr, setCollectionErr] = useState(false);
   const [collections, setCollections] = useState<CollectionOption[]>([]);
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
 
   const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
   const [gbifLoading, setGbifLoading]     = useState(false);
@@ -98,7 +100,8 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
       .then((data: any[]) =>
         setCollections(data.filter(c => c.isOwner).map(c => ({ id: c.id, name: c.name, isPublic: c.isPublic })))
       )
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setCollectionsLoaded(true));
   }, [userId]);
 
   // Setzt den kompletten GBIF-Zustand zurück (z. B. wenn der Artname geändert
@@ -156,13 +159,24 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   // Elternkomponente (MapPage) direkt einen Marker an der geklickten Position
   // ergänzen kann, ohne die komplette Marker-Liste neu laden zu müssen.
   const handleSave = async () => {
-    if (!displayName.trim()) { setNameErr(true); return; }
+    // Name UND Sammlung sind Pflicht: ein Tier muss immer einer eigenen Sammlung
+    // zugeordnet werden (ohne Sammlung kann kein Eintrag gespeichert werden).
+    let invalid = false;
+    if (!displayName.trim()) { setNameErr(true); invalid = true; }
+    if (!collectionId)       { setCollectionErr(true); invalid = true; }
+    if (invalid) return;
+
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`${API}/api/animals/map`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Clerk-User-Id mitschicken, damit das Backend die Sammlungs-Eigentümerschaft
+          // prüfen und den Ersteller (CreatedByUserId) setzen kann.
+          ...(userId ? { 'X-Clerk-User-Id': userId } : {}),
+        },
         body: JSON.stringify({
           name:         displayName.trim(),
           sex:          sex === 'Unbekannt' ? null : sex,
@@ -177,7 +191,7 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
           lebensraum:   lebensraum.trim() || null,
           findDate:     findDate || null,
           taxonomyId:   taxonomyId,
-          collectionId: collectionId ? parseInt(collectionId) : null,
+          collectionId: parseInt(collectionId),
         }),
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
@@ -314,19 +328,36 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
             </div>
           </div>
 
-          {collections.length > 0 && (
-            <div className="tp-group">
-              <label className="tp-label">Sammlung</label>
-              <select className="tp-input tp-select" value={collectionId} onChange={e => setCollectionId(e.target.value)}>
-                <option value="">— keine Sammlung —</option>
-                {collections.map(c => (
-                  <option key={c.id} value={String(c.id)}>
-                    {c.isPublic ? '🌐' : '🔒'} {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Sammlung ist Pflicht: jedes Tier muss einer eigenen Sammlung zugeordnet werden.
+              Hat der Nutzer noch keine Sammlung, wird ein Hinweis mit Link zum Anlegen gezeigt
+              und das Speichern ist nicht möglich (siehe handleSave + deaktivierter Save-Button). */}
+          <div className="tp-group">
+            <label className="tp-label">Sammlung <span className="tp-req">*</span></label>
+            {collections.length > 0 ? (
+              <>
+                <select
+                  className={`tp-input tp-select${collectionErr ? ' tp-input-err' : ''}`}
+                  value={collectionId}
+                  onChange={e => { setCollectionId(e.target.value); setCollectionErr(false); }}
+                >
+                  <option value="">— bitte auswählen —</option>
+                  {collections.map(c => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.isPublic ? '🌐' : '🔒'} {c.name}
+                    </option>
+                  ))}
+                </select>
+                {collectionErr && <span className="tp-hint">Bitte eine Sammlung auswählen.</span>}
+              </>
+            ) : collectionsLoaded ? (
+              <div className="tp-no-collection">
+                Du hast noch keine eigene Sammlung. Lege zuerst eine Sammlung an, um ein Tier speichern zu können.
+                <a href="/Sammlung" className="tp-no-collection-link">→ Zu meinen Sammlungen</a>
+              </div>
+            ) : (
+              <div className="tp-gbif-hint">Sammlungen werden geladen…</div>
+            )}
+          </div>
 
           <div className="tp-group">
             <label className="tp-label">Geschlecht</label>
@@ -373,7 +404,12 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
 
           <div className="tp-actions">
             <button className="tp-btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
-            <button className="tp-btn-save"   disabled={saving} onClick={handleSave}>
+            <button
+              className="tp-btn-save"
+              disabled={saving || collections.length === 0}
+              title={collections.length === 0 ? 'Ohne eigene Sammlung kann kein Tier gespeichert werden.' : undefined}
+              onClick={handleSave}
+            >
               {saving ? '⏳ Wird gespeichert…' : '💾 Speichern'}
             </button>
           </div>
@@ -492,6 +528,10 @@ export default function MapPage() {
     setFormOpen(true);
   };
 
+  // Ref-Callback: öffnet das Marker-Popup (siehe openItemPopup im Karten-Effekt weiter
+  // unten) auch aus Handlern außerhalb dieses Effekts heraus (z.B. flyToItem bei der Suche).
+  const openItemPopupRef = useRef<((item: MapItem) => void) | null>(null);
+
   // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
   const addMarkerRef = useRef < ((name: string,
     sex: string, id: number,
@@ -592,7 +632,7 @@ export default function MapPage() {
     addMarkerRef.current = (name, sex, id, lng, lat, locationName) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
       // Selbst angelegte Objekte darf man auch gleich wieder löschen.
-      const newItem: MapItem = { itemId: id, itemName: name, locationName: name, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true };
+      const newItem: MapItem = { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true };
       // stopPropagation verhindert, dass der Klick zusätzlich den Karten-eigenen
       // click-Handler auslöst (der sonst das "Tier erfassen"-Formular als
       // Vollbild-Overlay über dem Popup öffnen würde).
@@ -601,7 +641,7 @@ export default function MapPage() {
       markersRef.current.set(id, marker);
       setItems(prev => [
         ...prev,
-        { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex },
+        newItem,
       ]);
     };
 
@@ -901,6 +941,17 @@ export default function MapPage() {
           .tp-gbif-search-row { display: flex; gap: 8px; }
           .tp-gbif-search-row .tp-input { flex: 1; }
           .tp-gbif-hint { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+
+          .tp-no-collection {
+            font-size: 12px; color: #92400e; background: #fffbeb;
+            border: 1px solid #fde68a; border-radius: 8px; padding: 10px 12px;
+            display: flex; flex-direction: column; gap: 8px;
+          }
+          .tp-no-collection-link {
+            align-self: flex-start; font-size: 12px; font-weight: 600;
+            color: #0078FF; text-decoration: none;
+          }
+          .tp-no-collection-link:hover { text-decoration: underline; }
 
           .tp-btn-gbif-search {
             white-space: nowrap; padding: 8px 14px; background: #eff6ff;

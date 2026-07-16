@@ -523,15 +523,29 @@ namespace TodoApi.Controllers
                 return BadRequest("Longitude zwischen -180 und 180.");
             }
 
-            if (dto.CollectionId.HasValue)
+            // Sammlung ist beim Anlegen über die Karte Pflicht: jedes Tier muss einer
+            // (eigenen) Sammlung zugeordnet sein, sonst wird es nicht gespeichert.
+            if (!dto.CollectionId.HasValue)
             {
-                var collectionExists = await _context.Collections
-                    .AnyAsync(c => c.Id == dto.CollectionId.Value);
+                return BadRequest("Sammlung ist erforderlich");
+            }
 
-                if (!collectionExists)
-                {
-                    return BadRequest("Collection existiert nicht");
-                }
+            var collection = await _context.Collections
+                .FirstOrDefaultAsync(c => c.Id == dto.CollectionId.Value);
+
+            if (collection == null)
+            {
+                return BadRequest("Collection existiert nicht");
+            }
+
+            // Ist der Nutzer identifizierbar, darf er nur in seine eigenen Sammlungen einordnen
+            // (Admin/Moderator ausgenommen). Anonyme Anfragen bleiben wie bisher zugelassen.
+            if (currentUser != null
+                && collection.UserId != currentUser.Id
+                && currentUser.Role != "Admin"
+                && currentUser.Role != "Moderator")
+            {
+                return Forbid();
             }
 
             if (dto.TaxonomyId.HasValue)

@@ -1181,11 +1181,16 @@ export default function SammlungPage() {
   };
 
   // Öffnet beim (Wieder-)Laden der Seite automatisch die Sammlung aus dem
-  // Query-Parameter, z.B. nach dem Zurücknavigieren von /tier/[id].
+  // Query-Parameter, z.B. nach dem Zurücknavigieren von /tier/[id]. Verschwindet
+  // der Query-Parameter wieder (z.B. beim Klick auf den Navbar-Link "/Sammlung",
+  // während man in der Detailansicht ist), wird die Detailansicht geschlossen,
+  // damit man tatsächlich zur Übersicht zurückkehrt.
   useEffect(() => {
     if (!router.isReady) return;
     const collectionId = parseInt(router.query.collection as string, 10);
-    if (!isNaN(collectionId) && detail?.id !== collectionId) {
+    if (isNaN(collectionId)) {
+      if (detail) setDetail(null);
+    } else if (detail?.id !== collectionId) {
       openCollection(collectionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
