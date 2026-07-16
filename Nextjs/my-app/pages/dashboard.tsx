@@ -31,6 +31,7 @@ type Loan = {
   id: number;
   objectId: number | null;
   objectName: string | null;
+  lenderId: number | null;
   borrowerFirstName: string | null;
   borrowerLastName: string | null;
   borrowerName: string | null;
@@ -88,6 +89,8 @@ export default function DashboardPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [showNotif, setShowNotif] = useState(false);
   const [pendingTax, setPendingTax] = useState(0);
+  const [pendingLoanRequests, setPendingLoanRequests] = useState(0);
+  const [pendingLoanModeration, setPendingLoanModeration] = useState(0);
   const [userRole, setUserRole] = useState('Nutzer');
 
   const miniMapContainer = useRef<HTMLDivElement>(null);
@@ -124,8 +127,10 @@ export default function DashboardPage() {
 
   // Fetch active loans
   // Lädt die Leihen des Nutzers per Bearer-Token (LoanController erfordert
-  // [Authorize]) und filtert bereits zurückgegebene Leihen heraus, damit nur
-  // aktive/überfällige in der "Aktive Leihen"-Kachel erscheinen.
+  // [Authorize]) und behält nur aktive/überfällige Leihen (status "offen"),
+  // damit unbeantwortete Anfragen ("angefragt") und abgelehnte Anfragen nicht
+  // fälschlich in der "Aktive Leihen"-Kachel mitgezählt werden. Ausleih-Anfragen,
+  // bei denen der Nutzer der Verleiher ist, fließen separat in pendingLoanRequests.
   useEffect(() => {
     if (!clerkId) return;
     let cancelled = false;
@@ -133,10 +138,22 @@ export default function DashboardPage() {
       try {
         const token = await getToken();
         if (!token || cancelled) return;
-        const res = await fetch(`${API}/api/loan`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok || cancelled) return;
-        const data: Loan[] = await res.json();
-        if (!cancelled) setLoans(data.filter((l) => l.status !== "zurückgegeben"));
+        const [loanRes, meRes] = await Promise.all([
+          fetch(`${API}/api/loan`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API}/api/users/me`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        if (cancelled) return;
+        if (loanRes.ok) {
+          const data: Loan[] = await loanRes.json();
+          if (cancelled) return;
+          setLoans(data.filter((l) => l.status === "offen"));
+          if (meRes.ok) {
+            const me = await meRes.json();
+            if (!cancelled) {
+              setPendingLoanRequests(data.filter((l) => l.status === "angefragt" && l.lenderId === me.id).length);
+            }
+          }
+        }
       } catch {}
     })();
     return () => { cancelled = true; };
@@ -145,7 +162,8 @@ export default function DashboardPage() {
   // Fetch role + role-specific notification data
   // Lädt die eigene Rolle per Bearer-Token (getToken()) — hier also ein
   // anderes Auth-Muster als bei den Leihen oben — und danach, nur für
-  // Moderator/Admin, die Anzahl ausstehender Taxonomie-Einreichungen.
+  // Moderator/Admin, die Anzahl ausstehender Taxonomie-Einreichungen sowie
+  // die Anzahl der Leihen, die als zweite Instanz auf ihre Freigabe warten.
   // `cancelled` verhindert, dass nach einem Unmount/erneuten Effect-Lauf noch
   // State auf einer veralteten Anfrage gesetzt wird (Race-Condition-Schutz).
   useEffect(() => {
@@ -163,6 +181,8 @@ export default function DashboardPage() {
         if ((role === 'Moderator' || role === 'Admin') && !cancelled) {
           const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
           if (taxRes.ok && !cancelled) setPendingTax((await taxRes.json()).length);
+          const loanModRes = await fetch(`${API}/api/loan/pending-moderation`, { headers: { Authorization: `Bearer ${token}` } });
+          if (loanModRes.ok && !cancelled) setPendingLoanModeration((await loanModRes.json()).length);
         }
       } catch {}
     })();
@@ -218,9 +238,10 @@ export default function DashboardPage() {
 
   // Role-based notifications
   // Baut die Liste der Benachrichtigungen aus den bereits geladenen Daten:
-  // überfällige Leihen und bald fällige Leihen (≤ 3 Tage) für alle Nutzer,
-  // ausstehende Taxonomie-Freigaben für Moderator/Admin, sowie ausstehende
-  // Objekt-Freigaben nur für Admin.
+  // überfällige Leihen, bald fällige Leihen (≤ 3 Tage) und offene Ausleihanfragen
+  // (als Verleiher) für alle Nutzer; ausstehende Taxonomie-Freigaben und zur
+  // Prüfung stehende Ausleihen (zweite Freigabeinstanz) für Moderator/Admin;
+  // ausstehende Objekt-Freigaben nur für Admin.
   interface Notif { icon: string; text: string; sub: string; href: string; urgent?: boolean; }
   const notifications: Notif[] = [];
   if (overdue > 0)
@@ -228,8 +249,12 @@ export default function DashboardPage() {
   const soonLoans = loans.filter(l => { if (!l.endDate || l.isOverdue) return false; return (new Date(l.endDate).getTime() - Date.now()) / 86400000 <= 3; });
   if (soonLoans.length > 0)
     notifications.push({ icon: '📅', text: `${soonLoans.length} Leihe${soonLoans.length !== 1 ? 'n' : ''} bald fällig`, sub: 'Rückgabe in ≤ 3 Tagen', href: '/leihe' });
+  if (pendingLoanRequests > 0)
+    notifications.push({ icon: '📩', text: `${pendingLoanRequests} Ausleihanfrage${pendingLoanRequests !== 1 ? 'n' : ''} offen`, sub: 'Warten auf deine Bestätigung', href: '/leihe', urgent: true });
   if ((userRole === 'Moderator' || userRole === 'Admin') && pendingTax > 0)
     notifications.push({ icon: '🌿', text: `${pendingTax} Taxonomie-Einreichung${pendingTax !== 1 ? 'en' : ''} ausstehend`, sub: 'Warten auf Moderation', href: '/moderator', urgent: pendingTax >= 5 });
+  if ((userRole === 'Moderator' || userRole === 'Admin') && pendingLoanModeration > 0)
+    notifications.push({ icon: '⇄', text: `${pendingLoanModeration} Ausleihe${pendingLoanModeration !== 1 ? 'n' : ''} zur Prüfung`, sub: 'Zweite Freigabe erforderlich', href: '/moderator', urgent: pendingLoanModeration >= 5 });
   if (userRole === 'Admin' && pending > 0)
     notifications.push({ icon: '📋', text: `${pending} Objekt${pending !== 1 ? 'e' : ''} ausstehend`, sub: 'Warten auf Freigabe', href: '/moderator' });
 

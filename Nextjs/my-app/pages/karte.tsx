@@ -49,6 +49,7 @@ interface MapItem {
   latitude: number;
   longitude: number;
   sex: string | null;
+  canDelete: boolean;
 }
 
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
@@ -468,16 +469,7 @@ export default function MapPage() {
     const map = mapInstance.current;
     if (!map) return;
     map.flyTo({ center: [it.longitude, it.latitude], zoom: 14 });
-    new Popup({ closeButton: true, closeOnClick: true, maxWidth: '220px' })
-      .setLngLat([it.longitude, it.latitude])
-      .setHTML(`
-        <div style="padding:10px 12px;font-family:sans-serif;font-size:13px;">
-          <div style="font-weight:600;margin-bottom:4px;">${it.itemName ?? it.locationName}</div>
-          <div style="color:#5f6368;font-size:11px;margin-bottom:8px;">${it.locationName}</div>
-          <a href="/tier/${it.itemId}" style="color:#0078FF;font-size:12px;font-weight:600;">Details ansehen →</a>
-        </div>
-      `)
-      .addTo(map);
+    openItemPopupRef.current?.(it);
     setSearch('');
     setSearchOpen(false);
   };
@@ -551,10 +543,60 @@ export default function MapPage() {
       return el;
     };
 
+    // Öffnet bei Klick auf einen Marker ein Popup mit Detail-Link und, falls der
+    // aktuelle Nutzer berechtigt ist (Ersteller oder Admin/Moderator, siehe
+    // GeoMapItemDto.CanDelete), einem Löschen-Button. Ersetzt die frühere direkte
+    // Navigation, damit überhaupt eine Möglichkeit zum Löschen besteht.
+    const openItemPopup = (item: MapItem) => {
+      const popup = new Popup({ closeButton: true, closeOnClick: true, maxWidth: '240px' })
+        .setLngLat([item.longitude, item.latitude])
+        .setHTML(`
+          <div style="padding:10px 12px;font-family:sans-serif;font-size:13px;">
+            <div style="font-weight:600;margin-bottom:4px;">${item.itemName ?? item.locationName}</div>
+            <div style="color:#5f6368;font-size:11px;margin-bottom:10px;">${item.locationName}</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <a href="/tier/${item.itemId}" style="color:#0078FF;font-size:12px;font-weight:600;text-decoration:none;">Details ansehen →</a>
+              ${item.canDelete ? `<button type="button" data-delete-item="${item.itemId}" style="margin-left:auto;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Löschen</button>` : ''}
+            </div>
+          </div>
+        `)
+        .addTo(map);
+
+      if (item.canDelete) {
+        const btn = popup.getElement()?.querySelector<HTMLButtonElement>(`[data-delete-item="${item.itemId}"]`);
+        btn?.addEventListener('click', async () => {
+          if (!confirm(`„${item.itemName ?? `Eintrag #${item.itemId}`}" wirklich löschen?`)) return;
+          btn.disabled = true;
+          btn.textContent = '⏳';
+          try {
+            const res = await fetch(`${API}/api/animals/${item.itemId}`, {
+              method: 'DELETE',
+              headers: userIdRef.current ? { 'X-Clerk-User-Id': userIdRef.current } : {},
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            markersRef.current.get(item.itemId)?.remove();
+            markersRef.current.delete(item.itemId);
+            setItems(prev => prev.filter(it => it.itemId !== item.itemId));
+            popup.remove();
+          } catch {
+            alert('Löschen fehlgeschlagen. Bitte versuche es erneut.');
+            btn.disabled = false;
+            btn.textContent = '🗑 Löschen';
+          }
+        });
+      }
+    };
+    openItemPopupRef.current = openItemPopup;
+
     // Marker nach dem Speichern setzen (via Ref aus React erreichbar)
     addMarkerRef.current = (name, sex, id, lng, lat, locationName) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
-      el.addEventListener('click', () => { window.location.href = `/tier/${id}`; });
+      // Selbst angelegte Objekte darf man auch gleich wieder löschen.
+      const newItem: MapItem = { itemId: id, itemName: name, locationName: name, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true };
+      // stopPropagation verhindert, dass der Klick zusätzlich den Karten-eigenen
+      // click-Handler auslöst (der sonst das "Tier erfassen"-Formular als
+      // Vollbild-Overlay über dem Popup öffnen würde).
+      el.addEventListener('click', (e) => { e.stopPropagation(); openItemPopup(newItem); });
       const marker = new Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
       markersRef.current.set(id, marker);
       setItems(prev => [
@@ -613,7 +655,7 @@ export default function MapPage() {
         for (const item of items) {
           const label = item.itemName ?? item.locationName;
           const el    = createMarkerElement(label, item.sex ?? undefined);
-          el.addEventListener('click', () => { window.location.href = `/tier/${item.itemId}`; });
+          el.addEventListener('click', (e) => { e.stopPropagation(); openItemPopup(item); });
           const marker = new Marker({ element: el }).setLngLat([item.longitude, item.latitude]).addTo(map);
           markersRef.current.set(item.itemId, marker);
         }

@@ -220,6 +220,14 @@ namespace TodoApi.Controllers
             var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
             var isAuthenticated = !string.IsNullOrWhiteSpace(clerkId);
 
+            User? currentUser = null;
+            if (isAuthenticated)
+            {
+                currentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+            }
+            var canModerate = currentUser != null && (currentUser.Role == "Admin" || currentUser.Role == "Moderator");
+
             var query = _context.CollectItems
                 .AsNoTracking()
                 .Where(i =>
@@ -261,7 +269,9 @@ namespace TodoApi.Controllers
                     TaxonomyId = i.TaxonomyId,
                     TaxonomyName = i.Taxonomy != null ? i.Taxonomy.Name : null,
 
-                    Status = i.Status
+                    Status = i.Status,
+
+                    CanDelete = currentUser != null && (canModerate || i.CreatedByUserId == currentUser.Id)
                 })
                 .ToListAsync();
 
