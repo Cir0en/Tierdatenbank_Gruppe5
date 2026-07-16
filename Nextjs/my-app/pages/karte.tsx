@@ -12,11 +12,35 @@ import Navbar from '../components/Navbar';
 import { useAuth } from '@clerk/nextjs';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? '';
-const KATEGORIE_OPTIONS = ['Insekten','Säugetiere','Vögel','Amphibien','Reptilien','Fische','Spinnentiere','Schnecken','Sonstige'];
 const SELTENHEIT_OPTIONS = ['Häufig','Selten','Sehr selten','Ungefährdet','Wichtig','Geschützt','Stark gefährdet'];
 
-interface TaxonomyOption { id: number; name: string; rank: string | null; }
 interface CollectionOption { id: number; name: string; isPublic: boolean; }
+
+// GBIF-Taxonomie-Abgleich (Global Biodiversity Information Facility): entweder
+// ein eindeutiger Treffer (match_found) oder eine Liste von Vorschlägen, die
+// der Nutzer manuell bestätigen muss.
+interface GbifTaxonomy {
+  reich: string; stamm: string; klasse: string;
+  ordnung: string; familie: string; gattung: string; art: string;
+}
+interface GbifMatchResult {
+  status: 'match_found';
+  usageKey: number;
+  confidence: number;
+  canonicalName: string;
+  taxonomy: GbifTaxonomy;
+}
+interface GbifSuggestion {
+  usageKey?: number;
+  scientificName?: string;
+  canonicalName?: string;
+  rank?: string;
+}
+interface GbifNeedsConfirmation {
+  status: 'needs_confirmation';
+  suggestions: GbifSuggestion[];
+}
+type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
 
 interface MapItem {
   itemId: number;
@@ -31,25 +55,25 @@ interface MapItem {
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
 
 // Formular-Panel, das sich öffnet, wenn ein angemeldeter Nutzer auf die Karte
-// klickt. Erfasst die Tierdaten (Name, Kategorie, Maße, ...) für die zuvor per
+// klickt. Erfasst die Tierdaten (Name, Taxonomie, Maße, ...) für die zuvor per
 // Klick ermittelten Koordinaten (coords) und legt bei Bestätigung einen neuen
 // Datensatz über die Animals-API an. Lädt außerdem die eigenen (Owner-)Sammlungen
 // des Nutzers nach, damit das neue Tier optional direkt einer Sammlung zugeordnet
-// werden kann.
-function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
-  taxonomies: TaxonomyOption[];
+// werden kann. Die Felder entsprechen exakt dem Formular zum Hinzufügen eines
+// Tiers zu einer Sammlung (AddAnimalModal in Sammlung.tsx), inkl. GBIF-Workflow.
+function TierFormPanel({ coords, userId, onClose, onSaved }: {
   coords: { lng: number; lat: number };
   userId: string | null | undefined;
   onClose: () => void;
   onSaved: (name: string, sex: string, id: number) => void;
 }) {
+  const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
   const [description, setDesc]      = useState('');
-  const [kategorie, setKategorie]   = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [lebensraum, setLebensraum] = useState('');
   const [findDate, setFindDate]     = useState('');
-  const [taxonomyId, setTaxonomyId] = useState('');
+  const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
   const [collectionId, setCollectionId] = useState('');
   const [sex, setSex]               = useState('Unbekannt');
   const [ageClass, setAgeClass]     = useState('');
@@ -59,6 +83,12 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
   const [error, setError]           = useState<string | null>(null);
   const [nameErr, setNameErr]       = useState(false);
   const [collections, setCollections] = useState<CollectionOption[]>([]);
+
+  const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
+  const [gbifLoading, setGbifLoading]     = useState(false);
+  const [gbifError, setGbifError]         = useState<string | null>(null);
+  const [confirmedName, setConfirmedName] = useState<string | null>(null);
+  const [confirming, setConfirming]       = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -70,12 +100,62 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
       .catch(() => {});
   }, [userId]);
 
-  // Validiert minimal (Artname erforderlich) und legt das neue Tier inkl.
+  // Setzt den kompletten GBIF-Zustand zurück (z. B. wenn der Artname geändert
+  // wird und ein vorheriger Treffer/Vorschlag damit ungültig wird).
+  const resetGbif = () => {
+    setGbifResult(null);
+    setConfirmedName(null);
+    setTaxonomyId(null);
+    setGbifError(null);
+  };
+
+  // Fragt die GBIF-Taxonomie-API mit dem eingegebenen Artnamen ab. Ergebnis ist
+  // entweder ein eindeutiger Treffer oder eine Liste von Vorschlägen (siehe GbifResult).
+  const handleGbifSearch = async () => {
+    if (!name.trim()) return;
+    setGbifLoading(true);
+    resetGbif();
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGbifResult(await res.json());
+    } catch (e: any) {
+      setGbifError('GBIF-Suche fehlgeschlagen: ' + e.message);
+    } finally {
+      setGbifLoading(false);
+    }
+  };
+
+  // Bestätigt einen GBIF-Treffer/-Vorschlag (per usageKey): das Backend legt
+  // dafür ggf. einen Taxonomie-Datensatz an/findet ihn und liefert dessen id
+  // zurück, die anschließend beim Speichern des Tiers mitgeschickt wird.
+  const handleGbifConfirm = async (usageKey: number, displayName: string) => {
+    setConfirming(true);
+    setGbifError(null);
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageKey }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTaxonomyId(data.taxonomyId);
+      setConfirmedName(displayName);
+      setGbifResult(null);
+    } catch (e: any) {
+      setGbifError('Bestätigung fehlgeschlagen: ' + e.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // Validiert minimal (Name erforderlich) und legt das neue Tier inkl.
   // Koordinaten per POST an. Bei Erfolg wird onSaved() aufgerufen, damit die
   // Elternkomponente (MapPage) direkt einen Marker an der geklickten Position
   // ergänzen kann, ohne die komplette Marker-Liste neu laden zu müssen.
   const handleSave = async () => {
-    if (!name.trim()) { setNameErr(true); return; }
+    if (!displayName.trim()) { setNameErr(true); return; }
     setSaving(true);
     setError(null);
     try {
@@ -83,7 +163,7 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name:         name.trim(),
+          name:         displayName.trim(),
           sex:          sex === 'Unbekannt' ? null : sex,
           ageClass:     ageClass || null,
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
@@ -92,21 +172,23 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
           longitude:    coords.lng,
           description:  description.trim() || null,
           status:       seltenheit || null,
-          kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           findDate:     findDate || null,
-          taxonomyId:   taxonomyId   ? parseInt(taxonomyId)   : null,
+          taxonomyId:   taxonomyId,
           collectionId: collectionId ? parseInt(collectionId) : null,
         }),
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       const saved = await res.json();
-      onSaved(name.trim(), sex, saved.id);
+      onSaved(displayName.trim(), sex, saved.id);
     } catch (err: any) {
       setError(err.message);
       setSaving(false);
     }
   };
+
+  const matchResult  = gbifResult?.status === 'match_found'        ? gbifResult as GbifMatchResult       : null;
+  const needsConfirm = gbifResult?.status === 'needs_confirmation'  ? gbifResult as GbifNeedsConfirmation : null;
 
   return (
     <div className="tp-overlay" onClick={saving ? undefined : onClose}>
@@ -121,15 +203,88 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
           {error && <div className="tp-error">{error}</div>}
 
           <div className="tp-group">
-            <label className="tp-label">Artname <span className="tp-req">*</span></label>
+            <label className="tp-label">Name <span className="tp-req">*</span></label>
             <input
               className={`tp-input${nameErr ? ' tp-input-err' : ''}`}
-              type="text" autoFocus placeholder="z. B. Papilio machaon"
-              value={name}
-              onChange={e => { setName(e.target.value); setNameErr(false); }}
+              type="text" autoFocus placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
+              value={displayName}
+              onChange={e => { setDisplayName(e.target.value); setNameErr(false); }}
             />
-            {nameErr && <span className="tp-hint">Bitte Artname eingeben.</span>}
+            {nameErr && <span className="tp-hint">Bitte einen Namen eingeben.</span>}
           </div>
+
+          {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
+          <div className="tp-group">
+            <label className="tp-label">Artname (Taxonomie-Suche)</label>
+            <div className="tp-gbif-search-row">
+              <input type="text" className="tp-input"
+                placeholder="z. B. Parnassius apollo"
+                value={name}
+                onChange={e => { setName(e.target.value); resetGbif(); }}
+                onKeyDown={e => { if (e.key === 'Enter') handleGbifSearch(); }} />
+              <button type="button" className="tp-btn-gbif-search"
+                onClick={handleGbifSearch}
+                disabled={!name.trim() || gbifLoading || saving}>
+                {gbifLoading ? '⏳' : '🔍 Suchen'}
+              </button>
+            </div>
+            <div className="tp-gbif-hint">Wissenschaftlichen Artnamen eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
+          </div>
+
+          {gbifError && <div className="tp-error">{gbifError}</div>}
+
+          {/* Bestätigte Taxonomie */}
+          {confirmedName && (
+            <div className="tp-gbif-confirmed">
+              <span>✓ Taxonomie: <em>{confirmedName}</em></span>
+              <button type="button" onClick={resetGbif} title="Zurücksetzen">✕</button>
+            </div>
+          )}
+
+          {/* GBIF Treffer */}
+          {matchResult && (
+            <div className="tp-gbif-preview">
+              <div className="tp-gbif-preview-title">
+                GBIF-Treffer — {matchResult.confidence}% Übereinstimmung
+              </div>
+              <div className="tp-gbif-chain">
+                {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
+                  <span key={rank} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span className="tp-gbif-chain-item">
+                      <span className="tp-gbif-rank">{rank}</span>
+                      <span className="tp-gbif-val">{val}</span>
+                    </span>
+                    {i < arr.length - 1 && <span className="tp-gbif-arrow">›</span>}
+                  </span>
+                ))}
+              </div>
+              <button type="button" className="tp-btn-gbif-accept" disabled={confirming}
+                onClick={() => handleGbifConfirm(matchResult.usageKey, matchResult.canonicalName)}>
+                {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
+              </button>
+            </div>
+          )}
+
+          {/* GBIF Vorschläge */}
+          {needsConfirm && (
+            <div className="tp-gbif-preview tp-gbif-preview--warn">
+              <div className="tp-gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
+              {needsConfirm.suggestions.filter(s => s.usageKey).length > 0 ? (
+                <>
+                  <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
+                  {needsConfirm.suggestions.filter(s => s.usageKey).map((s, i) => (
+                    <button key={i} type="button" className="tp-btn-gbif-suggestion" disabled={confirming}
+                      onClick={() => handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                      <em>{s.canonicalName ?? s.scientificName}</em>
+                      {s.rank && <span className="tp-gbif-rank"> [{s.rank}]</span>}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+              )}
+            </div>
+          )}
 
           <div className="tp-group">
             <label className="tp-label">Beschreibung</label>
@@ -137,44 +292,23 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
               value={description} onChange={e => setDesc(e.target.value)} />
           </div>
 
-          <div className="tp-row">
-            <div className="tp-group">
-              <label className="tp-label">Tier-Kategorie</label>
-              <select className="tp-input tp-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
-                <option value="">— nicht angegeben —</option>
-                {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-            <div className="tp-group">
-              <label className="tp-label">Seltenheit</label>
-              <select className="tp-input tp-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
-                <option value="">— nicht angegeben —</option>
-                {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
           <div className="tp-group">
-            <label className="tp-label">Lebensraum</label>
-            <input className="tp-input" type="text" placeholder="z. B. Alpine Wiesen, Berghänge"
-              value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+            <label className="tp-label">Seltenheit</label>
+            <select className="tp-input tp-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+              <option value="">— nicht angegeben —</option>
+              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
           </div>
 
           <div className="tp-row">
+            <div className="tp-group">
+              <label className="tp-label">Lebensraum</label>
+              <input className="tp-input" type="text" placeholder="z. B. Alpine Wiesen, Berghänge"
+                value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+            </div>
             <div className="tp-group">
               <label className="tp-label">Funddatum</label>
               <input className="tp-input" type="date" value={findDate} onChange={e => setFindDate(e.target.value)} />
-            </div>
-            <div className="tp-group">
-              <label className="tp-label">Wissenschaftlicher Name</label>
-              <select className="tp-input tp-select" value={taxonomyId} onChange={e => setTaxonomyId(e.target.value)}>
-                <option value="">— keine —</option>
-                {taxonomies.map(t => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.rank ? `[${t.rank}] ` : ''}{t.name}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 
@@ -209,7 +343,7 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
             <label className="tp-label">Altersklasse</label>
             <select className="tp-input tp-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
               <option value="">— nicht angegeben —</option>
-              <option value="Juvenile">Juvenil</option>
+              <option value="Juvenil">Juvenil</option>
               <option value="Subadult">Subadult</option>
               <option value="Adult">Adult</option>
               <option value="Senior">Senior</option>
@@ -271,7 +405,6 @@ export default function MapPage() {
 
   const [formOpen, setFormOpen]     = useState(false);
   const [formCoords, setFormCoords] = useState<{ lng: number; lat: number } | null>(null);
-  const [taxonomies, setTaxonomies] = useState<TaxonomyOption[]>([]);
 
   // ── Suche ─────────────────────────────────────────────────────────────
   // Alle geladenen Marker-Items werden hier gespiegelt, damit rein clientseitig
@@ -313,14 +446,6 @@ export default function MapPage() {
 
   // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
   const addMarkerRef = useRef<((name: string, sex: string, id: number, lng: number, lat: number) => void) | null>(null);
-
-  // Taxonomien für den Formular-Select
-  useEffect(() => {
-    fetch(`${API}/api/taxonomy`)
-      .then(r => r.ok ? r.json() : [])
-      .then(setTaxonomies)
-      .catch(() => {});
-  }, []);
 
   // Initialisiert die MapTiler-Karte genau einmal (sobald der Container im DOM
   // ist und die Next.js-Route/-Query bereit ist) und registriert alle
@@ -551,7 +676,6 @@ export default function MapPage() {
         {/* Panel ist position:fixed → bricht aus overflow:hidden des Elternelements aus */}
         {formOpen && formCoords && (
           <TierFormPanel
-            taxonomies={taxonomies}
             coords={formCoords}
             userId={userId}
             onClose={() => setFormOpen(false)}
@@ -681,6 +805,68 @@ export default function MapPage() {
           .tp-unit-wrap      { position: relative; display: flex; align-items: center; }
           .tp-unit-input     { padding-right: 30px !important; }
           .tp-unit           { position: absolute; right: 10px; font-size: 11px; color: #9aa0a6; font-weight: 500; pointer-events: none; }
+
+          .tp-gbif-search-row { display: flex; gap: 8px; }
+          .tp-gbif-search-row .tp-input { flex: 1; }
+          .tp-gbif-hint { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+
+          .tp-btn-gbif-search {
+            white-space: nowrap; padding: 8px 14px; background: #eff6ff;
+            border: 1px solid #bfdbfe; border-radius: 6px;
+            font-size: 12px; font-weight: 600; color: #1d4ed8;
+            cursor: pointer; font-family: inherit; transition: all .15s;
+          }
+          .tp-btn-gbif-search:hover:not(:disabled) { background: #dbeafe; }
+          .tp-btn-gbif-search:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-gbif-preview {
+            background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 10px;
+            padding: 14px; margin-bottom: 14px;
+          }
+          .tp-gbif-preview--warn { background: #fffbeb; border-color: #fde68a; }
+          .tp-gbif-preview-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 10px; }
+
+          .tp-gbif-chain {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 4px; margin-bottom: 12px;
+          }
+          .tp-gbif-chain-item {
+            display: flex; flex-direction: column; align-items: center;
+            background: #fff; border: 1px solid #d1fae5; border-radius: 6px;
+            padding: 4px 8px; min-width: 56px;
+          }
+          .tp-gbif-rank  { font-size: 9px; color: #9ca3af; text-transform: capitalize; }
+          .tp-gbif-val   { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+          .tp-gbif-arrow { font-size: 14px; color: #9ca3af; line-height: 1; }
+
+          .tp-btn-gbif-accept {
+            padding: 7px 16px; background: #0078FF; color: #fff; border: none;
+            border-radius: 7px; font-size: 12px; font-weight: 600;
+            cursor: pointer; font-family: inherit; transition: background .15s;
+          }
+          .tp-btn-gbif-accept:hover:not(:disabled) { background: #0060cc; }
+          .tp-btn-gbif-accept:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-btn-gbif-suggestion {
+            display: block; width: 100%; text-align: left; margin-bottom: 6px;
+            padding: 8px 12px; background: #fff; border: 1px solid #fde68a;
+            border-radius: 8px; font-size: 12px; cursor: pointer;
+            font-family: inherit; transition: all .15s;
+          }
+          .tp-btn-gbif-suggestion:hover:not(:disabled) { background: #fffbeb; border-color: #f59e0b; }
+          .tp-btn-gbif-suggestion:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-gbif-confirmed {
+            display: flex; align-items: center; gap: 8px; justify-content: space-between;
+            background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 8px;
+            padding: 10px 14px; margin-bottom: 14px;
+            font-size: 13px; color: #065f46; font-weight: 500;
+          }
+          .tp-gbif-confirmed button {
+            background: none; border: none; cursor: pointer;
+            font-size: 14px; color: #9ca3af; padding: 0 4px; line-height: 1;
+          }
+          .tp-gbif-confirmed button:hover { color: #374151; }
 
           .tp-radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
           .tp-radio {

@@ -41,7 +41,6 @@ interface CollectionItem {
   taxonomyName: string | null;
   taxonomyRank: string | null;
   findingLocation: string | null;
-  kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
   imageCreatedAt: string | null;
@@ -73,7 +72,6 @@ interface BorrowedItem {
 }
 
 const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
-const KATEGORIE_OPTIONS  = ['Insekten', 'Säugetiere', 'Vögel', 'Amphibien', 'Reptilien', 'Fische', 'Spinnentiere', 'Schnecken', 'Sonstige'];
 
 interface CollectionDetail extends Collection {
   items: CollectionItem[];
@@ -123,7 +121,15 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
         body: JSON.stringify({ name: name.trim(), description: description.trim() || null, isPublic }),
+        
       });
+      // Notification hier einfügen
+      if (isPublic == true){const notres = await fetch(`${API}/api/notifications/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json'},
+        body: JSON.stringify({ title: `A New Public Collection was created`, body: `The collection "${name.trim()}" has been created and is now publicly available. Check it out!`,
+        segment:'Test Users'})});
+      } 
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       onSaved();
     } catch (err: any) {
@@ -499,7 +505,6 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   const [bodyMass, setBodyMass]     = useState('');
   const [bodyLen, setBodyLen]       = useState('');
   const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
-  const [kategorie, setKategorie]   = useState('');
   const [lebensraum, setLebensraum] = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
@@ -587,7 +592,6 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           taxonomyId:   taxonomyId,
-          kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           status:       seltenheit || null,
           collectionId,
@@ -698,21 +702,12 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             value={description} onChange={e => setDesc(e.target.value)} />
         </div>
 
-        <div className="form-row-2">
-          <div className="form-group">
-            <label className="form-label">Tier-Kategorie</label>
-            <select className="form-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Seltenheit</label>
-            <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+        <div className="form-group">
+          <label className="form-label">Seltenheit</label>
+          <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+            <option value="">— nicht angegeben —</option>
+            {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
 
         <div className="form-row-2">
@@ -747,7 +742,7 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             <label className="form-label">Altersklasse</label>
             <select className="form-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
               <option value="">— nicht angegeben —</option>
-              <option value="Juvenile">Juvenil</option>
+              <option value="Juvenil">Juvenil</option>
               <option value="Subadult">Subadult</option>
               <option value="Adult">Adult</option>
               <option value="Senior">Senior</option>
@@ -863,7 +858,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           {detail.items.map(item => {
             const badge = statusBadge(item.status);
             return (
-              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}`)}>
+              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}?fromCollection=${detail.id}`)}>
                 {item.canDelete && (
                   <button className="animal-delete-btn" disabled={deletingId === item.id}
                     onClick={e => handleDeleteAnimal(e, item)} title="Tier löschen">
@@ -896,10 +891,8 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                   )}
 
                   <div className="animal-card-meta">
-                    {(item.kategorie || item.taxonomyRank) && (
-                      <span className="animal-card-cat">
-                        {item.kategorie ?? item.taxonomyRank}
-                      </span>
+                    {item.taxonomyRank && (
+                      <span className="animal-card-cat">{item.taxonomyRank}</span>
                     )}
                     {item.lebensraum && (
                       <span className="animal-card-cat">{item.lebensraum}</span>
@@ -1023,8 +1016,11 @@ type Tab = 'public' | 'mine' | 'borrowed';
 // Hauptkomponente der Seite /Sammlung. Verwaltet sowohl die Grid-Übersicht
 // (mit Tabs "Öffentlich" / "Meine Sammlungen" und Volltextsuche über den Namen)
 // als auch die Detailansicht (siehe CollectionDetailView), zwischen denen über
-// den lokalen `detail`-State umgeschaltet wird (kein eigenes Routing/URL-Wechsel).
+// den lokalen `detail`-State umgeschaltet wird. Die geöffnete Sammlung wird per
+// ?collection=<id> in der URL gespiegelt (shallow routing), damit ein Zurück-
+// navigieren von der Tier-Detailseite wieder dieselbe Sammlung öffnet.
 export default function SammlungPage() {
+  const router = useRouter();
   const { user } = useUser();
   const { isSignedIn, getToken } = useAuth();
   // clerkUserId wird bei jeder Sammlungs-/Objekt-API-Anfrage als
@@ -1115,10 +1111,16 @@ export default function SammlungPage() {
   useEffect(() => { load(); }, [load]);
 
   // Lädt die Detaildaten (inkl. aller enthaltenen Tier-Einträge) einer
-  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um.
+  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um. Spiegelt
+  // die geöffnete Sammlung zusätzlich per Query-Parameter in der URL, damit ein
+  // Zurücknavigieren (z.B. von der Tier-Detailseite) wieder in derselben
+  // Sammlung landet statt in der Übersicht (siehe onBack unten).
   const openCollection = async (id: number) => {
     setDetailLoading(true);
     setDetail(null);
+    if (router.query.collection !== String(id)) {
+      router.push({ pathname: '/Sammlung', query: { collection: id } }, undefined, { shallow: true });
+    }
     try {
       const res = await fetch(`${API}/api/collections/${id}`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
@@ -1131,6 +1133,17 @@ export default function SammlungPage() {
       setDetailLoading(false);
     }
   };
+
+  // Öffnet beim (Wieder-)Laden der Seite automatisch die Sammlung aus dem
+  // Query-Parameter, z.B. nach dem Zurücknavigieren von /tier/[id].
+  useEffect(() => {
+    if (!router.isReady) return;
+    const collectionId = parseInt(router.query.collection as string, 10);
+    if (!isNaN(collectionId) && detail?.id !== collectionId) {
+      openCollection(collectionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.collection]);
 
   // Callback nach erfolgreichem Anlegen einer Sammlung: Modal schließen und
   // Liste neu laden, damit die neue Sammlung sofort sichtbar ist.
@@ -1489,7 +1502,10 @@ export default function SammlungPage() {
               </div>
               <CollectionDetailView
                 detail={detail}
-                onBack={() => setDetail(null)}
+                onBack={() => {
+                  setDetail(null);
+                  router.push('/Sammlung', undefined, { shallow: true });
+                }}
                 onAnimalAdded={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
                 clerkUserId={clerkUserId}

@@ -10,7 +10,6 @@ public class CollectionItemDto
     public string? TaxonomyName { get; set; }
     public string? TaxonomyRank { get; set; }
     public string? FindingLocation { get; set; }
-    public string? Kategorie { get; set; }
     public string? Lebensraum { get; set; }
 
     /// <summary>Id des ältesten hochgeladenen Bildes (für /api/images/{id}/content); null wenn kein Bild vorhanden.</summary>

@@ -457,6 +457,7 @@ namespace TodoApi.Controllers
                 FindingLocationId = location.Id,
                 FindDate = dto.FindDate,
                 Description = dto.Description,
+                Lebensraum = dto.Lebensraum,
                 // Ohne explizite Statusangabe startet jedes neue Fundobjekt als "ausstehend" (Moderationsworkflow)
                 Status = string.IsNullOrWhiteSpace(dto.Status) ? "ausstehend" : dto.Status,
                 CreatedByUserId = currentUser?.Id,

@@ -470,14 +470,6 @@ export default function DashboardPage() {
         .tbl tr:last-child td { border-bottom: none; }
         .td-name { color: var(--text-hi); font-style: italic; }
         .td-id { color: var(--text-lo); font-size: 10px; }
-        .td-actions { display: flex; gap: 6px; }
-        .tbl-btn {
-          font-size: 9px; letter-spacing: 0.06em; background: none;
-          border: 1px solid var(--border); border-radius: 2px; padding: 2px 7px;
-          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono);
-          transition: all 0.15s;
-        }
-        .tbl-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
 
         /* ── Pills ── */
         .pill {
@@ -711,7 +703,6 @@ export default function DashboardPage() {
                         <th>Fundort</th>
                         <th>Datum</th>
                         <th>Status</th>
-                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -728,12 +719,6 @@ export default function DashboardPage() {
                           {/* <td style={{ whiteSpace: "nowrap" }}>{s.datum}</td>*/}
                           <td style={{ whiteSpace: "nowrap" }}>{formatDate(s.findDate)} </td>
                           <td><StatusPill status={s.status} /></td>
-                          <td>
-                            <div className="td-actions">
-                              <button className="tbl-btn">Edit</button>
-                              <button className="tbl-btn">Karte</button>
-                            </div>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
