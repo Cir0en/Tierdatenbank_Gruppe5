@@ -143,6 +143,13 @@ namespace TodoApi.Controllers
                         // Löschrecht für ein einzelnes Tier: Admin/Moderator oder der Nutzer, der es angelegt hat
                         // (siehe AnimalsController.DeleteAnimal) — bewusst unabhängig vom Sammlungs-Eigentümer.
                         CanDelete = currentUser != null && (canModerate || item.CreatedByUserId == currentUser.Id),
+                        CreatedByUsername = item.CreatedByUser != null ? item.CreatedByUser.Username : null,
+                        HasPendingLoanRequest = currentUser != null &&
+                            item.Loans.Any(l => l.Status == "angefragt" && l.BorrowerId == currentUser.Id),
+                        // Ein direkt angelegter Verleih oder eine vom Verleiher bestätigte Anfrage
+                        // wartet noch auf die zweite Freigabestufe durch Moderator/Admin (siehe
+                        // LoanController) — das Objekt ist in dieser Zeit bereits reserviert.
+                        IsLoanPending = item.Loans.Any(l => l.Status == "in_pruefung"),
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();

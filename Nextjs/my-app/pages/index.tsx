@@ -78,12 +78,20 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [showNotif, setShowNotif] = useState(false);
   const [pendingTax, setPendingTax] = useState(0);
+  const [pendingLoanModeration, setPendingLoanModeration] = useState(0);
   const [userRole, setUserRole] = useState("Nutzer");
-  const [notifLoans, setNotifLoans] = useState<{ endDate: string | null; isOverdue: boolean }[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [notifLoans, setNotifLoans] = useState<{ id: number; objectName: string | null; endDate: string | null; status: string | null; isOverdue: boolean; lenderId: number | null; borrowerId: number | null }[]>([]);
   const [rejectedSubs, setRejectedSubs] = useState<{ id: number; art: string; moderatorNote: string | null }[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(() => {
     try {
       const stored = localStorage.getItem("dismissed_tax_rejections");
+      return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
+    } catch { return new Set<number>(); }
+  });
+  const [dismissedLoanIds, setDismissedLoanIds] = useState<Set<number>>(() => {
+    try {
+      const stored = localStorage.getItem("dismissed_loan_rejections");
       return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
     } catch { return new Set<number>(); }
   });
@@ -165,8 +173,11 @@ export default function HomePage() {
       const me = await meRes.json();
       const role: string = me.role ?? "Nutzer";
       setUserRole(role);
+      setCurrentUserId(me.id ?? null);
 
-      // Fetch real loans for overdue/soon notifications (Bearer-Token, LoanController erfordert [Authorize])
+      // Fetch real loans for overdue/soon notifications sowie eigene offene
+      // Ausleihanfragen (als Verleiher) und abgelehnte Leihen (Bearer-Token,
+      // LoanController erfordert [Authorize])
       const loanRes = await fetch(`${API}/api/loan`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -182,12 +193,18 @@ export default function HomePage() {
         setRejectedSubs(allSubs.filter((s) => s.status === "rejected"));
       }
 
-      // Pending taxonomy submissions (Moderator / Admin only)
+      // Pending taxonomy submissions + Leihen zur Prüfung (Moderator / Admin only)
       if (role === "Moderator" || role === "Admin") {
         const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
         if (taxRes.ok) setPendingTax((await taxRes.json()).length);
+
+        const loanModRes = await fetch(`${API}/api/loan/pending-moderation`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (loanModRes.ok) setPendingLoanModeration((await loanModRes.json()).length);
       } else {
         setPendingTax(0);
+        setPendingLoanModeration(0);
       }
     } catch {}
   }, [clerkId, getToken]);
@@ -217,6 +234,12 @@ export default function HomePage() {
 
   const pending = specimens.filter((s) => s.status === "ausstehend").length;
   const overdue = notifLoans.filter((l) => l.isOverdue).length;
+  const pendingLoanRequests = notifLoans.filter((l) => l.status === "angefragt" && l.lenderId === currentUserId).length;
+  const rejectedLoans = notifLoans.filter((l) =>
+    l.status === "abgelehnt" &&
+    (l.lenderId === currentUserId || l.borrowerId === currentUserId) &&
+    !dismissedLoanIds.has(l.id)
+  );
 
   // Markiert eine abgelehnte Taxonomie-Einreichung als "gelesen": die id wird
   // nur lokal (localStorage) gemerkt, damit sie beim nächsten Besuch nicht
@@ -227,18 +250,32 @@ export default function HomePage() {
     try { localStorage.setItem("dismissed_tax_rejections", JSON.stringify([...next])); } catch {}
   };
 
+  // Wie handleDismissRejection, nur für eigene abgelehnte Ausleihen.
+  const handleDismissLoanRejection = (id: number) => {
+    const next = new Set(dismissedLoanIds).add(id);
+    setDismissedLoanIds(next);
+    try { localStorage.setItem("dismissed_loan_rejections", JSON.stringify([...next])); } catch {}
+  };
+
   // Rollenbasierte Benachrichtigungen: baut die Liste der im Panel gezeigten
-  // Einträge aus den geladenen Daten zusammen (überfällige Leihen für alle,
-  // ausstehende Taxonomie-Freigaben nur für Moderator/Admin, eigene
-  // abgelehnte Einreichungen abzüglich bereits ausgeblendeter).
-  type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number };
+  // Einträge aus den geladenen Daten zusammen (überfällige Leihen und offene
+  // Ausleihanfragen als Verleiher für alle, ausstehende Taxonomie-Freigaben
+  // und zur Prüfung stehende Ausleihen nur für Moderator/Admin, eigene
+  // abgelehnte Einreichungen/Ausleihen abzüglich bereits ausgeblendeter).
+  type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number; dismissKind?: "tax" | "loan" };
   const notifications: Notif[] = [];
   if (overdue > 0)
     notifications.push({ icon: "⚠", text: `${overdue} Leihe${overdue !== 1 ? "n" : ""} überfällig`, sub: "Rückgabe überschritten", href: "/leihe", urgent: true });
+  if (pendingLoanRequests > 0)
+    notifications.push({ icon: "📩", text: `${pendingLoanRequests} Ausleihanfrage${pendingLoanRequests !== 1 ? "n" : ""} offen`, sub: "Warten auf deine Bestätigung", href: "/leihe", urgent: true });
   if ((userRole === "Moderator" || userRole === "Admin") && pendingTax > 0)
     notifications.push({ icon: "🌿", text: `${pendingTax} Taxonomie-Einreichung${pendingTax !== 1 ? "en" : ""} ausstehend`, sub: "Warten auf Moderation", href: "/moderator", urgent: pendingTax >= 5 });
+  if ((userRole === "Moderator" || userRole === "Admin") && pendingLoanModeration > 0)
+    notifications.push({ icon: "⇄", text: `${pendingLoanModeration} Ausleihe${pendingLoanModeration !== 1 ? "n" : ""} zur Prüfung`, sub: "Zweite Freigabe erforderlich", href: "/moderator", urgent: pendingLoanModeration >= 5 });
   for (const s of rejectedSubs.filter((s) => !dismissedIds.has(s.id)))
-    notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id });
+    notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id, dismissKind: "tax" });
+  for (const l of rejectedLoans)
+    notifications.push({ icon: "❌", text: `Ausleihe „${l.objectName ?? `Objekt #${l.id}`}" abgelehnt`, sub: "Anfrage bzw. Leihe wurde nicht freigegeben", href: "/leihe", dismissId: l.id, dismissKind: "loan" });
 
   // Client-seitige Volltextsuche über Name, Taxon und Fundort der geladenen Objekte.
   const q = search.toLowerCase();
@@ -597,7 +634,9 @@ export default function HomePage() {
                             <button
                               className="notif-dismiss"
                               title="Als gelesen markieren"
-                              onClick={() => handleDismissRejection(n.dismissId!)}
+                              onClick={() => n.dismissKind === "loan"
+                                ? handleDismissLoanRejection(n.dismissId!)
+                                : handleDismissRejection(n.dismissId!)}
                             >
                               ✓
                             </button>
