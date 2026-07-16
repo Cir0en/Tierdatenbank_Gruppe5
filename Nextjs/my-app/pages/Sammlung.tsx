@@ -118,7 +118,15 @@ function CreateModal({ onClose, onSaved, clerkUserId }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Clerk-User-Id': clerkUserId },
         body: JSON.stringify({ name: name.trim(), description: description.trim() || null, isPublic }),
+        
       });
+      // Notification hier einfügen
+      if (isPublic == true){const notres = await fetch(`${API}/api/notifications/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json'},
+        body: JSON.stringify({ title: `A New Public Collection was created`, body: `The collection "${name.trim()}" has been created and is now publicly available. Check it out!`,
+        segment:'Test Users'})});
+      } 
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       onSaved();
     } catch (err: any) {
