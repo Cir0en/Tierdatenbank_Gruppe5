@@ -36,9 +36,11 @@ namespace TodoApi.Controllers
             return await _context.CollectItems.ToListAsync();
         }
 
-        // GET /api/animals/{id} — Detailansicht eines Fundobjekts inkl. Taxonomie, Sammlung und Fundort
+        // GET /api/animals/{id} — Detailansicht eines Fundobjekts inkl. Taxonomie, Sammlung und Fundort;
+        // enthält zusätzlich canEdit/canDelete für den anfragenden Nutzer (siehe CanModifyItem), damit
+        // das Frontend den Bearbeiten-/Löschen-Button nur bei Berechtigung anzeigt.
         [HttpGet("{id}")]
-        public async Task<ActionResult<CollectItem>> GetAnimal(int id)
+        public async Task<ActionResult<object>> GetAnimal(int id)
         {
             var obj = await _context.CollectItems
                 .Include(o => o.Taxonomy)
@@ -47,7 +49,33 @@ namespace TodoApi.Controllers
                 .FirstOrDefaultAsync(o => o.Id == id);
 
             if (obj == null) return NotFound();
-            return obj;
+
+            var currentUser = await GetCurrentUserAsync();
+            var canModify = currentUser != null && CanModifyItem(currentUser, obj);
+
+            return Ok(new
+            {
+                obj.Id,
+                obj.CollectionId,
+                obj.TaxonomyId,
+                obj.FindingLocationId,
+                obj.Name,
+                obj.FindDate,
+                obj.Description,
+                obj.StorageInfo,
+                obj.CreatedAt,
+                obj.Status,
+                obj.Sex,
+                obj.AgeClass,
+                obj.Lebensraum,
+                obj.BodyMassGram,
+                obj.BodyLengthMm,
+                Taxonomy = obj.Taxonomy == null ? null : new { obj.Taxonomy.Id, obj.Taxonomy.Name, obj.Taxonomy.Rank },
+                Collection = obj.Collection == null ? null : new { obj.Collection.Id, obj.Collection.Name },
+                FindingLocation = obj.FindingLocation == null ? null : new { obj.FindingLocation.Id, obj.FindingLocation.Name, obj.FindingLocation.Latitude, obj.FindingLocation.Longitude },
+                CanEdit = canModify,
+                CanDelete = canModify,
+            });
         }
 
         // GET /api/animals/dashboard — schlanke Projektion für die Dashboard-Tabelle;
@@ -442,6 +470,16 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
         }
 
+        // Bearbeitungs-/Löschrecht für ein Fundobjekt: Admin/Moderator oder der Nutzer, der den
+        // Eintrag angelegt hat (CreatedByUserId). Gemeinsam genutzt von GetAnimal (canEdit/canDelete-
+        // Flags), UpdateAnimal und DeleteAnimal, damit alle drei Aktionen dieselbe Regel anwenden.
+        private static bool CanModifyItem(User user, CollectItem item)
+        {
+            var isModerator = user.Role == "Admin" || user.Role == "Moderator";
+            var isCreator = item.CreatedByUserId.HasValue && item.CreatedByUserId == user.Id;
+            return isModerator || isCreator;
+        }
+
         // Sucht einen bestehenden Fundort mit identischem Namen + Koordinaten oder legt einen neuen an
         // (verhindert Duplikate für denselben Ort). Gemeinsam genutzt von CreateAnimal (optionale
         // Koordinaten) und CreateMapAnimal (Koordinaten aus Kartenklick).
@@ -533,6 +571,83 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
         }
 
+        // PUT /api/animals/{id} — bearbeitet ein bestehendes Fundobjekt (Stammdaten + Taxonomie +
+        // optionale Koordinaten). Dieselbe Berechtigung wie beim Löschen (siehe CanModifyItem):
+        // nur Admin/Moderator oder der Nutzer, der den Eintrag angelegt hat, dürfen bearbeiten.
+        // Koordinaten werden wie bei CreateAnimal/CreateMapAnimal über GetOrCreateLocationAsync
+        // aufgelöst statt einen evtl. von anderen Objekten geteilten Fundort direkt zu verändern;
+        // werden beide Koordinaten weggelassen, verliert das Objekt seinen Fundort.
+        [HttpPut("{id}")]
+        [AllowAnonymous]
+        public async Task<ActionResult<object>> UpdateAnimal(int id, UpdateAnimalDto dto)
+        {
+            var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
+
+            var item = await _context.CollectItems.FindAsync(id);
+            if (item == null)
+            {
+                return NotFound();
+            }
+
+            if (!CanModifyItem(currentUser, item))
+            {
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Name))
+            {
+                return BadRequest("Name fehlt");
+            }
+
+            if (dto.TaxonomyId.HasValue)
+            {
+                var taxonomyExists = await _context.Taxonomies.AnyAsync(t => t.Id == dto.TaxonomyId.Value);
+                if (!taxonomyExists)
+                {
+                    return BadRequest("Taxonomy existiert nicht");
+                }
+            }
+
+            int? findingLocationId = null;
+
+            if (dto.Latitude.HasValue && dto.Longitude.HasValue)
+            {
+                if (dto.Latitude < -90 || dto.Latitude > 90)
+                {
+                    return BadRequest("Latitude zwischen -90 und 90.");
+                }
+
+                if (dto.Longitude < -180 || dto.Longitude > 180)
+                {
+                    return BadRequest("Longitude zwischen -180 und 180.");
+                }
+
+                var location = await GetOrCreateLocationAsync(dto.Latitude.Value, dto.Longitude.Value, dto.LocationName);
+                findingLocationId = location.Id;
+            }
+
+            item.Name = dto.Name;
+            item.Sex = dto.Sex;
+            item.AgeClass = dto.AgeClass;
+            item.BodyMassGram = dto.BodyMassGram;
+            item.BodyLengthMm = dto.BodyLengthMm;
+            item.TaxonomyId = dto.TaxonomyId;
+            item.FindingLocationId = findingLocationId;
+            item.FindDate = dto.FindDate;
+            item.Description = dto.Description;
+            item.Lebensraum = dto.Lebensraum;
+            item.StorageInfo = dto.StorageInfo;
+            item.Status = dto.Status;
+
+            await _context.SaveChangesAsync();
+
+            return await GetAnimal(id);
+        }
+
         // DELETE /api/animals/{id} — löscht ein einzelnes Fundobjekt (samt abhängiger Bilder/Ausleihen
         // per DB-Cascade); nur Admin/Moderator oder der Nutzer, der den Eintrag angelegt hat, dürfen löschen.
         [HttpDelete("{id}")]
@@ -551,10 +666,7 @@ namespace TodoApi.Controllers
                 return NotFound();
             }
 
-            var isModerator = currentUser.Role == "Admin" || currentUser.Role == "Moderator";
-            var isCreator = item.CreatedByUserId.HasValue && item.CreatedByUserId == currentUser.Id;
-
-            if (!isModerator && !isCreator)
+            if (!CanModifyItem(currentUser, item))
             {
                 return Forbid();
             }
