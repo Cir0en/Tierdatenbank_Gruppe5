@@ -49,4 +49,7 @@ public class GeoMapItemDto
     public string? AgeClass { get; set; }
     public decimal? BodyMassGram { get; set; }
     public decimal? BodyLengthMm { get; set; }
+
+    /// <summary>True, wenn der aktuelle Nutzer dieses Objekt löschen darf (Admin/Moderator oder Ersteller).</summary>
+    public bool CanDelete { get; set; }
 }

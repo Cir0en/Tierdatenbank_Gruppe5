@@ -53,6 +53,9 @@ interface CollectionItem {
   loanedToUsername: string | null;
   loanReturnDate: string | null;
   canDelete: boolean;
+  createdByUsername: string | null;
+  hasPendingLoanRequest: boolean;
+  isLoanPending: boolean;
 }
 
 interface BorrowedItem {
@@ -369,6 +372,89 @@ function LoanAnimalModal({ item, getToken, onClose, onSaved }: {
   );
 }
 
+// Modal zum Anfragen eines fremden Sammlungs-Eintrags (Tiers): der anfragende
+// Nutzer schlägt einen Zeitraum vor, der Eigentümer muss die Anfrage danach
+// über /leihe bestätigen oder ablehnen (siehe LoanController.ApproveLoanRequest).
+function RequestLoanModal({ item, getToken, onClose, onSaved }: {
+  item: CollectionItem;
+  getToken: () => Promise<string | null>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [startDate, setStart] = useState(today);
+  const [endDate, setEnd]     = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!startDate || !endDate) { setError('Bitte alle Felder ausfüllen.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/loan/request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ objectId: item.id, startDate, endDate }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? `Fehler ${res.status}`);
+      }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={saving ? undefined : onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">📩 Ausleihe anfragen</div>
+
+        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '10px 14px', marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{item.name ?? `Eintrag #${item.id}`}</div>
+          {item.taxonomyName && <div style={{ fontSize: 11, color: '#6b7280', fontStyle: 'italic', marginTop: 2 }}>{item.taxonomyName}</div>}
+        </div>
+
+        <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+          Die Eigentümerin/der Eigentümer der Sammlung muss deine Anfrage noch bestätigen, bevor die Ausleihe aktiv wird.
+        </p>
+
+        {error && <div className="modal-error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-row-2">
+            <div className="form-group">
+              <label className="form-label">Startdatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={startDate}
+                onChange={e => setStart(e.target.value)} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Rückgabedatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={endDate}
+                min={startDate} onChange={e => setEnd(e.target.value)} required />
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn-save" disabled={saving}>
+              {saving ? '⏳ Wird gesendet…' : '📩 Anfrage senden'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── GBIF Types ─────────────────────────────────────────────────────────────────
 // Typen für die Antwort der GBIF-Taxonomie-Suche (Global Biodiversity
 // Information Facility): entweder ein eindeutiger Treffer (match_found) oder
@@ -393,6 +479,7 @@ interface GbifSuggestion {
 }
 interface GbifNeedsConfirmation {
   status: 'needs_confirmation';
+  message?: string;
   suggestions: GbifSuggestion[];
 }
 type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
@@ -470,7 +557,10 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usageKey }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
       const data = await res.json();
       setTaxonomyId(data.taxonomyId);
       setConfirmedName(displayName);
@@ -622,7 +712,7 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
                 ))}
               </>
             ) : (
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>{needsConfirm.message ?? 'Keine Vorschläge gefunden.'}</div>
             )}
           </div>
         )}
@@ -744,6 +834,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
   const router = useRouter();
   const [showAddModal, setShowAddModal]     = useState(false);
   const [loanItem, setLoanItem]             = useState<CollectionItem | null>(null);
+  const [requestItem, setRequestItem]       = useState<CollectionItem | null>(null);
   const [loanSuccess, setLoanSuccess]       = useState<string | null>(null);
   const [deletingId, setDeletingId]         = useState<number | null>(null);
 
@@ -857,6 +948,10 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                     )}
                   </div>
 
+                  {item.createdByUsername && (
+                    <div className="animal-card-creator">👤 {item.createdByUsername}</div>
+                  )}
+
                   {item.status && (
                     <span className="animal-card-badge"
                       style={{ background: badge.bg, color: badge.color }}>
@@ -877,6 +972,10 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                       <div className="btn-loan-animal btn-loan-animal--disabled" title="Dieses Tier ist bereits verliehen">
                         Bereits verliehen
                       </div>
+                    ) : item.isLoanPending ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Wartet auf Freigabe durch Moderation">
+                        🕓 Wird geprüft
+                      </div>
                     ) : (
                       <button
                         className="btn-loan-animal"
@@ -884,6 +983,29 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                         title="Dieses Tier ausleihen"
                       >
                         ⇄ Ausleihen
+                      </button>
+                    )
+                  )}
+
+                  {/* Nicht-Eigentümer können eine Ausleihe anfragen statt sie selbst anzulegen —
+                      Bestätigung durch den Eigentümer und anschließend durch die Moderation erfolgt
+                      unter /leihe bzw. /moderator. */}
+                  {!detail.isOwner && clerkUserId && (
+                    item.isOnLoan ? null : item.isLoanPending ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Wartet auf Freigabe durch Moderation">
+                        🕓 Wird geprüft
+                      </div>
+                    ) : item.hasPendingLoanRequest ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Warten auf Bestätigung durch die Eigentümerin/den Eigentümer">
+                        📩 Anfrage gesendet
+                      </div>
+                    ) : (
+                      <button
+                        className="btn-loan-animal"
+                        onClick={e => { e.stopPropagation(); setRequestItem(item); setLoanSuccess(null); }}
+                        title="Ausleihe für dieses Tier anfragen"
+                      >
+                        📩 Ausleihe anfragen
                       </button>
                     )
                   )}
@@ -910,8 +1032,21 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           onClose={() => setLoanItem(null)}
           onSaved={() => {
             setLoanItem(null);
-            setLoanSuccess(`„${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde erfolgreich ausgeliehen.`);
-            onAnimalAdded(); // lädt die Sammlung neu, damit der "Verliehen"-Badge sofort sichtbar wird
+            setLoanSuccess(`Ausleihe für „${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde angelegt und wartet auf Freigabe durch die Moderation.`);
+            onAnimalAdded(); // lädt die Sammlung neu, damit der "Wird geprüft"-Status sofort sichtbar wird
+          }}
+        />
+      )}
+
+      {requestItem && clerkUserId && (
+        <RequestLoanModal
+          item={requestItem}
+          getToken={getToken}
+          onClose={() => setRequestItem(null)}
+          onSaved={() => {
+            setRequestItem(null);
+            setLoanSuccess(`Anfrage für „${requestItem.name ?? `Eintrag #${requestItem.id}`}" wurde gesendet.`);
+            onAnimalAdded(); // lädt die Sammlung neu, damit "Anfrage gesendet" sofort sichtbar wird
           }}
         />
       )}
@@ -1333,6 +1468,7 @@ export default function SammlungPage() {
         .animal-card-meta { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
         .animal-card-cat  { font-size: 12px; color: #6b7280; }
         .animal-card-loc  { font-size: 12px; color: #6b7280; }
+        .animal-card-creator { font-size: 12px; color: #6b7280; margin-top: 2px; }
         .animal-card-badge {
           display: inline-block; margin-top: 8px; align-self: flex-start;
           font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;

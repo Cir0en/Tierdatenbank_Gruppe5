@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
@@ -610,6 +611,14 @@ export default function TaxonomiePage() {
           flex-shrink: 0;
         }
         .btn-add-entry:hover { background: #1b4332; }
+        .add-entry-hint {
+          display: flex; align-items: center; gap: 7px; white-space: nowrap;
+          padding: 9px 16px; background: #f8f9fa; color: #6b7280;
+          border: 1px dashed #d1d5db; border-radius: 8px; font-size: 12px;
+          flex-shrink: 0;
+        }
+        .add-entry-hint a { color: #2d6a4f; font-weight: 600; text-decoration: none; }
+        .add-entry-hint a:hover { text-decoration: underline; }
 
         /* ── Breadcrumb ── */
         .breadcrumb {
@@ -778,10 +787,18 @@ export default function TaxonomiePage() {
               <h1 className="page-title">🌿 Taxonomie</h1>
               <p className="page-sub">Hierarchische Klassifizierung der erfassten Arten</p>
             </div>
-            {!showAnimals && isSignedIn && (
-              <button className="btn-add-entry" onClick={() => setShowCreateModal(true)}>
-                + Neuer Eintrag
-              </button>
+            {!showAnimals && (
+              isSignedIn ? (
+                <button className="btn-add-entry" onClick={() => setShowCreateModal(true)}>
+                  + Neuer Eintrag
+                </button>
+              ) : (
+                // Nicht eingeloggte Besucher können keine Taxonomien anlegen — statt den Button
+                // kommentarlos zu verstecken, erklären, warum, und direkt zum Login verlinken.
+                <span className="add-entry-hint">
+                  🔒 <Link href="/login">Anmelden</Link>, um neue Einträge hinzuzufügen
+                </span>
+              )
             )}
           </div>
 

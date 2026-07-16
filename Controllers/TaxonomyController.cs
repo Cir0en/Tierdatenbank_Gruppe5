@@ -20,11 +20,14 @@ namespace TodoApi.Controllers
     {
         private readonly NeondbContext _context;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly TodoApi.Services.ClerkUserProvisioningService _userProvisioning;
 
-        public TaxonomyController(NeondbContext context, IHttpClientFactory httpClientFactory)
+        public TaxonomyController(NeondbContext context, IHttpClientFactory httpClientFactory,
+                                   TodoApi.Services.ClerkUserProvisioningService userProvisioning)
         {
             _context = context;
             _httpClientFactory = httpClientFactory;
+            _userProvisioning = userProvisioning;
         }
 
         // Prüft, ob GBIF für ein Taxon alle benötigten Rangstufen zwischen Stamm und Art geliefert hat.
@@ -152,11 +155,22 @@ namespace TodoApi.Controllers
             return Ok(taxonomy);
         }
 
-        // POST /api/taxonomy — legt einen einzelnen Taxonomie-Eintrag direkt an (z.B. für Admin-Tools);
-        // wird zunächst als nicht genehmigt (IsApproved = false) angelegt
+        // POST /api/taxonomy — legt einen einzelnen Taxonomie-Eintrag direkt an (z.B. für Admin-Tools),
+        // ohne den regulären Freigabe-Workflow (submissions/GBIF) zu durchlaufen; wird zunächst als
+        // nicht genehmigt (IsApproved = false) angelegt. Nur Admin/Moderator dürfen das, da hiermit
+        // die Moderationsprüfung umgangen wird.
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<object>> CreateTaxonomy(CreateTaxonomyDto dto)
         {
+            var clerkId = User.FindFirst("sub")?.Value;
+            var currentUser = string.IsNullOrWhiteSpace(clerkId)
+                ? null
+                : await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+
+            if (currentUser == null || (currentUser.Role != "Admin" && currentUser.Role != "Moderator"))
+                return Forbid();
+
             if (string.IsNullOrWhiteSpace(dto.Name))
                 return BadRequest("Name ist erforderlich.");
 
@@ -242,16 +256,34 @@ namespace TodoApi.Controllers
                 });
             }
 
+            // limit höher als die tatsächlich gewünschten 5 Vorschläge ansetzen, da danach noch
+            // nach Animalia + vollständiger Rangkette gefiltert wird (siehe unten) und GBIF unter
+            // demselben Suchbegriff auch viele Nicht-Tier-Treffer liefert (z.B. die Pflanzengattung
+            // "Fuchsia" bei der Suche nach "Fuchs").
             var suggestUrl =
-                $"species/suggest?q={Uri.EscapeDataString(speciesName)}&rank=SPECIES&limit=5";
+                $"species/suggest?q={Uri.EscapeDataString(speciesName)}&rank=SPECIES&limit=20";
 
-            var suggestions = await client.GetFromJsonAsync<List<GbifSpeciesDto>>(suggestUrl)
+            var rawSuggestions = await client.GetFromJsonAsync<List<GbifSpeciesDto>>(suggestUrl)
                 ?? new List<GbifSpeciesDto>();
+
+            // Nur Vorschläge anzeigen, die bei einer Bestätigung (POST .../gbif/confirm) auch
+            // tatsächlich akzeptiert würden — Animalia-Reich und vollständige Rangkette (siehe
+            // HasCompleteAnimalTaxonomy). Sonst könnte der Nutzer einen Vorschlag anklicken, der
+            // serverseitig doch abgelehnt wird (Non-Animalia-Namensgleichheit oder bei GBIF
+            // unvollständige Klassifikation, z.B. fehlende Ordnung).
+            var suggestions = rawSuggestions
+                .Where(s => string.Equals(s.Kingdom, "Animalia", StringComparison.OrdinalIgnoreCase)
+                            && HasCompleteAnimalTaxonomy(s))
+                .Take(5)
+                .ToList();
 
             return Ok(new
             {
                 status = "needs_confirmation",
-                message = "Keine sichere GBIF-Übereinstimmung gefunden.",
+                message = suggestions.Count > 0
+                    ? "Keine sichere GBIF-Übereinstimmung gefunden."
+                    : "Keine passende Tier-Art bei GBIF gefunden. GBIF durchsucht primär wissenschaftliche " +
+                      "(lateinische) Namen — versuche es damit, oder reiche die Art manuell ein.",
                 input = speciesName,
                 gbifMatch = gbif,
                 suggestions = suggestions.Select(s => new
@@ -294,7 +326,23 @@ namespace TodoApi.Controllers
             if (!string.Equals(gbif.Rank, "SPECIES", StringComparison.OrdinalIgnoreCase))
                 return BadRequest("Das ausgewählte Taxon ist keine Art.");
 
-            var species = await CreateChainFromGbifAsync(gbif);
+            // GBIF liefert nicht für jedes Taxon eine vollständige Rangkette (z.B. fehlende
+            // Ordnung) — in dem Fall lässt sich die Kette nicht automatisch aufbauen. Statt das
+            // als unbehandelten 500 durchschlagen zu lassen, sauber ablehnen und auf den manuellen
+            // Einreichungs-Workflow (POST /api/taxonomy/submissions) verweisen.
+            Taxonomy species;
+            try
+            {
+                species = await CreateChainFromGbifAsync(gbif);
+            }
+            catch (InvalidOperationException)
+            {
+                return BadRequest(new
+                {
+                    message = "GBIF liefert für dieses Taxon keine vollständige Klassifikation (z.B. fehlende Ordnung) " +
+                               "und kann daher nicht automatisch übernommen werden. Bitte die Art stattdessen manuell einreichen."
+                });
+            }
 
             return Ok(new
             {
@@ -328,6 +376,13 @@ namespace TodoApi.Controllers
             if (!string.IsNullOrWhiteSpace(clerkId))
             {
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+
+                // Normalerweise legt der Clerk-Webhook den Nutzer bei der Registrierung an; ist der
+                // Webhook nicht erreichbar (z.B. lokale Entwicklung ohne gültigen Tunnel), fehlt der
+                // Nutzer hier sonst dauerhaft und die Einreichung bliebe ohne CreatedBy. Fallback:
+                // direkt bei Clerk nachschlagen und lokal anlegen (siehe ClerkUserProvisioningService).
+                user ??= await _userProvisioning.ProvisionFromClerkAsync(clerkId);
+
                 createdBy = user?.Id;
             }
 
@@ -410,7 +465,11 @@ namespace TodoApi.Controllers
                     s.Art,
                     s.Source,
                     s.Status,
-                    s.CreatedAt
+                    s.CreatedAt,
+                    CreatedByUsername = _context.Users
+                        .Where(u => u.Id == s.CreatedBy)
+                        .Select(u => u.Username)
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 

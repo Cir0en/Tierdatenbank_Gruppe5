@@ -21,7 +21,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 //        weiter unten).
 // ═══════════════════════════════════════════════════════════════════════════
 
-type TabId = 'submissions' | 'reports';
+type TabId = 'submissions' | 'loans' | 'reports';
 
 // Aggregierte Kennzahlen für den "Berichte"-Tab, wie vom Backend
 // (/api/stats/moderator) geliefert.
@@ -63,6 +63,7 @@ interface Submission {
   source: string;
   status: string;
   createdAt: string;
+  createdByUsername: string | null;
 }
 
 // Zustand des Freigabe-/Ablehnen-Dialogs: welche Einreichung und welche Aktion.
@@ -87,7 +88,7 @@ function SubmissionRow({ sub, onApprove, onReject }: {
           {sub.gattung} · {sub.familie} · {sub.ordnung} · {sub.klasse}
         </div>
         <div className="sub-meta">
-          Eingereicht am {new Date(sub.createdAt).toLocaleDateString('de-DE', {
+          Eingereicht von <strong>{sub.createdByUsername ?? 'Unbekannt'}</strong> am {new Date(sub.createdAt).toLocaleDateString('de-DE', {
             day: '2-digit', month: '2-digit', year: 'numeric'
           })}
           {sub.source === 'manual' ? ' · Manuell' : ' · GBIF'}
@@ -96,6 +97,57 @@ function SubmissionRow({ sub, onApprove, onReject }: {
       <div className="sub-actions">
         <button className="btn-approve" onClick={() => onApprove(sub)}>Prüfen</button>
         <button className="btn-reject"  onClick={() => onReject(sub)}>Ablehnen</button>
+      </div>
+    </div>
+  );
+}
+
+// Eine Leihe, die bereits vom Verleiher bestätigt (oder direkt angelegt) wurde und nun als
+// zweite, unabhängige Instanz auf die Moderator/Admin-Freigabe wartet (status "in_pruefung").
+interface LoanSubmission {
+  id: number;
+  objectName: string | null;
+  lenderName: string | null;
+  lenderFirstName: string | null;
+  lenderLastName: string | null;
+  borrowerName: string | null;
+  borrowerFirstName: string | null;
+  borrowerLastName: string | null;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+function loanDisplayName(first: string | null, last: string | null, username: string | null): string {
+  if (first || last) return [first, last].filter(Boolean).join(' ');
+  return username ?? 'Unbekannt';
+}
+
+// Einzeilige Darstellung einer zur Prüfung stehenden Leihe mit direkten
+// "Bestätigen"/"Ablehnen"-Buttons (kein Dialog nötig, da keine Notiz erfasst wird).
+function LoanRow({ loan, busy, onApprove, onReject }: {
+  loan: LoanSubmission;
+  busy: boolean;
+  onApprove: (loan: LoanSubmission) => void;
+  onReject:  (loan: LoanSubmission) => void;
+}) {
+  return (
+    <div className="sub-row">
+      <div className="sub-icon">⇄</div>
+      <div className="sub-info">
+        <div className="sub-title">Ausleihe: <strong>{loan.objectName ?? `Objekt #${loan.id}`}</strong></div>
+        <div className="sub-tax">
+          {loanDisplayName(loan.lenderFirstName, loan.lenderLastName, loan.lenderName)} verleiht an{' '}
+          {loanDisplayName(loan.borrowerFirstName, loan.borrowerLastName, loan.borrowerName)}
+        </div>
+        <div className="sub-meta">
+          Zeitraum: {loan.startDate ? new Date(loan.startDate).toLocaleDateString('de-DE') : '—'}
+          {' → '}
+          {loan.endDate ? new Date(loan.endDate).toLocaleDateString('de-DE') : '—'}
+        </div>
+      </div>
+      <div className="sub-actions">
+        <button className="btn-approve" disabled={busy} onClick={() => onApprove(loan)}>Bestätigen</button>
+        <button className="btn-reject"  disabled={busy} onClick={() => onReject(loan)}>Ablehnen</button>
       </div>
     </div>
   );
@@ -150,6 +202,7 @@ function ReviewDialog({ modal, onClose, onDone }: {
 
         <div className="modal-body">
           <div className="tax-detail-grid">
+            <div className="tax-row"><span className="tax-key">Eingereicht von</span><span className="tax-val">{submission.createdByUsername ?? 'Unbekannt'}</span></div>
             <div className="tax-row"><span className="tax-key">Art</span><span className="tax-val">{submission.art}</span></div>
             <div className="tax-row"><span className="tax-key">Gattung</span><span className="tax-val">{submission.gattung}</span></div>
             <div className="tax-row"><span className="tax-key">Familie</span><span className="tax-val">{submission.familie}</span></div>
@@ -204,6 +257,10 @@ export default function ModeratorPage() {
   const [stats, setStats]           = useState<ModStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [userActivity, setUserActivity] = useState<UserActivity[]>([]);
+
+  const [loanSubmissions, setLoanSubmissions] = useState<LoanSubmission[]>([]);
+  const [loansLoading, setLoansLoading]       = useState(true);
+  const [loanBusyId, setLoanBusyId]           = useState<number | null>(null);
 
   const [dbRole, setDbRole] = useState<string | null>(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
@@ -262,6 +319,46 @@ export default function ModeratorPage() {
 
   useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
 
+  // Lädt die Liste der Leihen, die auf die Moderator/Admin-Freigabe warten (zweite,
+  // vom Verleiher unabhängige Instanz — siehe LoanController.GetPendingModeration).
+  // Erfordert Bearer-Token, da der Endpunkt serverseitig die Rolle prüft.
+  const fetchLoanSubmissions = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch(`${API}/api/loan/pending-moderation`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setLoanSubmissions(await res.json());
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoansLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => { if (isSignedIn) fetchLoanSubmissions(); }, [isSignedIn, fetchLoanSubmissions]);
+
+  // Bestätigt bzw. lehnt eine zur Prüfung stehende Leihe ab und entfernt sie
+  // bei Erfolg optimistisch aus der lokalen Liste.
+  const handleLoanDecision = async (loan: LoanSubmission, action: 'approve' | 'reject') => {
+    setLoanBusyId(loan.id);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/loan/${loan.id}/moderate-${action}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      setLoanSubmissions(prev => prev.filter(l => l.id !== loan.id));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoanBusyId(null);
+    }
+  };
+
   // Lädt die Berichtsdaten (Statistiken + Nutzer-Aktivität) für den
   // "Berichte"-Tab. Nutzt hier Bearer-Token-Auth (getToken()), da die
   // Stats-Endpunkte serverseitig die Moderator-/Admin-Rolle verifizieren müssen.
@@ -307,6 +404,7 @@ export default function ModeratorPage() {
 
   const tabs: { id: TabId; label: string; count?: number }[] = [
     { id: 'submissions', label: 'Taxonomie-Prüfung', count: submissions.length },
+    { id: 'loans',       label: 'Ausleih-Prüfung',   count: loanSubmissions.length },
     { id: 'reports',     label: 'Berichte' },
   ];
 
@@ -586,6 +684,34 @@ export default function ModeratorPage() {
                   </div>
                   <div style={{ marginTop: 12, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
                     {submissions.length} Einträge ausstehend · Alle anzeigen
+                  </div>
+                </>
+              )
+            )}
+
+            {tab === 'loans' && (
+              loansLoading ? (
+                <div style={{ color: '#9ca3af', fontSize: 13, padding: 24, textAlign: 'center' }}>Wird geladen…</div>
+              ) : loanSubmissions.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">✅</div>
+                  <div className="empty-text">Keine Leihen zur Prüfung — alles erledigt!</div>
+                </div>
+              ) : (
+                <>
+                  <div className="sub-list">
+                    {loanSubmissions.map(loan => (
+                      <LoanRow
+                        key={loan.id}
+                        loan={loan}
+                        busy={loanBusyId === loan.id}
+                        onApprove={l => handleLoanDecision(l, 'approve')}
+                        onReject={l  => handleLoanDecision(l, 'reject')}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 12, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+                    {loanSubmissions.length} Leihen zur Prüfung
                   </div>
                 </>
               )
