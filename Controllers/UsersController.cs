@@ -55,11 +55,57 @@ public class UsersController : ControllerBase
 
         var me = await _db.Users
             .Where(u => u.ClerkId == clerkId && u.DeletedAt == null)
-            .Select(u => new { u.Id, u.Role, u.Username, u.FirstName, u.LastName, u.IsBanned })
+            .Select(u => new { u.Id, u.Role, u.Username, u.FirstName, u.LastName, u.IsBanned, u.Email, u.Institution, u.CreatedAt })
             .FirstOrDefaultAsync();
 
         if (me == null) return NotFound();
         return Ok(me);
+    }
+
+    // PUT /api/users/me — eigenes Profil (Benutzername/Institution) bearbeiten. Der Benutzername wird
+    // zusätzlich bei Clerk aktualisiert, da er sonst beim nächsten "user.updated"-Webhook (z.B. nach
+    // einem Passwort-Wechsel) wieder mit dem alten Clerk-Wert überschrieben würde (siehe
+    // ClerkWebhookController).
+    [HttpPut("me")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
+    {
+        var clerkId = User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(clerkId)) return Unauthorized();
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+        if (user == null) return NotFound("Benutzer wurde nicht gefunden.");
+
+        var username = dto.Username?.Trim();
+        if (string.IsNullOrWhiteSpace(username) || username.Length < 3)
+            return BadRequest("Der Benutzername muss mindestens 3 Zeichen lang sein.");
+
+        var institution = string.IsNullOrWhiteSpace(dto.Institution) ? null : dto.Institution.Trim();
+
+        if (!string.Equals(username, user.Username, StringComparison.Ordinal))
+        {
+            var taken = await _db.Users.AnyAsync(u => u.Id != user.Id && u.Username == username);
+            if (taken) return BadRequest("Dieser Benutzername ist bereits vergeben.");
+
+            var clerkClient = _httpClientFactory.CreateClient("Clerk");
+            var clerkResponse = await clerkClient.PatchAsJsonAsync(
+                $"users/{Uri.EscapeDataString(user.ClerkId)}",
+                new { username });
+
+            if (!clerkResponse.IsSuccessStatusCode)
+            {
+                var body = await clerkResponse.Content.ReadAsStringAsync();
+                return StatusCode(
+                    StatusCodes.Status502BadGateway,
+                    $"Der Benutzername konnte nicht übernommen werden (evtl. ungültiges Format oder bereits vergeben). {body}");
+            }
+
+            user.Username = username;
+        }
+
+        user.Institution = institution;
+        await _db.SaveChangesAsync();
+
+        return Ok(new { user.Id, user.Username, user.Institution });
     }
 
     // GET /api/users — alle Benutzer (nur Admin)

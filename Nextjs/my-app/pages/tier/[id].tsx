@@ -105,6 +105,12 @@ function formatDate(d: string | null): string | null {
   }
 }
 
+// Formatiert Breiten-/Längengrad als lesbare Dezimalgrad-Angabe (z. B. für Fundorte
+// ohne Adresse/Straßen wie Wälder, wo der reine Ortsname wenig aussagekräftig ist).
+function formatCoords(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
 // ── Bearbeitungs-Formular ────────────────────────────────────────────────────
 //
 // Formular zum Bearbeiten eines bestehenden Tier-Eintrags (Stammdaten + Taxonomie +
@@ -870,6 +876,9 @@ export default function TierDetailPage() {
                       )}
                       {animal.findingLocation && (
                         <tr><td>Fundort</td><td>{animal.findingLocation.name}</td></tr>
+                      )}
+                      {animal.findingLocation && animal.findingLocation.latitude != null && animal.findingLocation.longitude != null && (
+                        <tr><td>Koordinaten</td><td>{formatCoords(animal.findingLocation.latitude, animal.findingLocation.longitude)}</td></tr>
                       )}
                       {animal.bodyMassGram != null && (
                         <tr><td>Körpermasse</td><td>{animal.bodyMassGram} g</td></tr>
