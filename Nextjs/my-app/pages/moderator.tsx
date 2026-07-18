@@ -21,7 +21,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 //        weiter unten).
 // ═══════════════════════════════════════════════════════════════════════════
 
-type TabId = 'submissions' | 'loans' | 'reports';
+type TabId = 'submissions' | 'loans' | 'reports' | 'users';
 
 // Aggregierte Kennzahlen für den "Berichte"-Tab, wie vom Backend
 // (/api/stats/moderator) geliefert.
@@ -48,6 +48,19 @@ interface UserActivity {
   loansActive: number;
   loansOverdue: number;
   lastSubmission: string | null;
+}
+
+// Ein Nutzer in der Moderator-Nutzerverwaltung (/api/users/manage) — inkl. Sperrstatus,
+// damit Moderatoren/Admins Konten sperren/entsperren können.
+interface ManagedUser {
+  id: number;
+  username: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  role: string | null;
+  createdAt: string | null;
+  isBanned: boolean;
 }
 
 // Eine ausstehende Taxonomie-Einreichung (manuell oder via GBIF-Vorschlag).
@@ -241,6 +254,109 @@ function ReviewDialog({ modal, onClose, onDone }: {
   );
 }
 
+// Nutzerverwaltung für Moderatoren/Admins: bestehende Nutzer sperren/entsperren
+// (POST /api/users/{id}/ban|unban). Läuft über Bearer-Token, da die Endpunkte serverseitig
+// die Rolle prüfen. Moderatoren dürfen laut Backend nur reguläre Nutzer sperren; die Buttons
+// werden entsprechend geführt. Das Anlegen neuer Konten ist Admins vorbehalten (siehe admin.tsx).
+function UserManagement({ getToken, currentRole }: {
+  getToken: () => Promise<string | null>;
+  currentRole: string;
+}) {
+  const [users, setUsers]     = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+  const [busyId, setBusyId]   = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/users/manage`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setUsers(await res.json());
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleBanToggle = async (u: ManagedUser) => {
+    const action = u.isBanned ? 'unban' : 'ban';
+    if (!u.isBanned && !confirm(`„${u.username}" wirklich sperren?`)) return;
+    setBusyId(u.id);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/users/${u.id}/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, isBanned: !x.isBanned } : x));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Moderatoren dürfen nur reguläre Nutzer sperren; Admins zusätzlich Moderatoren.
+  // Admin-Konten sind grundsätzlich nicht sperrbar (müssen vorher heruntergestuft werden).
+  const canManage = (u: ManagedUser) => {
+    if (u.role === 'Admin') return false;
+    if (currentRole === 'Moderator' && u.role !== 'Nutzer') return false;
+    return true;
+  };
+
+  return (
+    <div className="um-wrap">
+      {/* Nutzerliste */}
+      <div className="um-card">
+        <div className="um-card-title">Nutzer ({users.length})</div>
+        {error && <div className="modal-error">{error}</div>}
+        {loading ? (
+          <div style={{ color: '#9ca3af', fontSize: 13, padding: 16, textAlign: 'center' }}>Wird geladen…</div>
+        ) : users.length === 0 ? (
+          <div className="empty-state"><div className="empty-icon">👤</div><div className="empty-text">Keine Nutzer gefunden.</div></div>
+        ) : (
+          <div className="um-table">
+            <div className="um-thead">
+              <span>Nutzer</span><span>E-Mail</span><span>Rolle</span><span>Status</span><span></span>
+            </div>
+            {users.map(u => (
+              <div className="um-trow" key={u.id}>
+                <span className="um-name">{[u.firstName, u.lastName].filter(Boolean).join(' ') || u.username}<br /><span className="um-sub">@{u.username}</span></span>
+                <span className="um-email">{u.email}</span>
+                <span><span className={`um-role um-role--${(u.role ?? 'Nutzer').toLowerCase()}`}>{u.role ?? 'Nutzer'}</span></span>
+                <span>{u.isBanned ? <span className="um-banned">Gesperrt</span> : <span className="um-active">Aktiv</span>}</span>
+                <span style={{ textAlign: 'right' }}>
+                  {canManage(u) ? (
+                    <button
+                      className={u.isBanned ? 'btn-approve' : 'btn-reject'}
+                      disabled={busyId === u.id}
+                      onClick={() => handleBanToggle(u)}
+                    >
+                      {busyId === u.id ? '⏳' : u.isBanned ? 'Entsperren' : 'Sperren'}
+                    </button>
+                  ) : (
+                    <span className="um-nolabel">—</span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Hauptkomponente der Moderator-Seite: regelt den Rollen-Zugriffsschutz,
 // lädt Einreichungen sowie Berichtsdaten je nach aktivem Tab, und verwaltet
 // den Freigabe-/Ablehnen-Dialog.
@@ -405,6 +521,7 @@ export default function ModeratorPage() {
   const tabs: { id: TabId; label: string; count?: number }[] = [
     { id: 'submissions', label: 'Taxonomie-Prüfung', count: submissions.length },
     { id: 'loans',       label: 'Ausleih-Prüfung',   count: loanSubmissions.length },
+    { id: 'users',       label: 'Nutzerverwaltung' },
     { id: 'reports',     label: 'Berichte' },
   ];
 
@@ -627,6 +744,30 @@ export default function ModeratorPage() {
         .ua-zero { color: #d1d5db; }
         .ua-date { font-size: 11px; color: #6b7280; }
 
+        /* Nutzerverwaltung */
+        .um-wrap { display: flex; flex-direction: column; gap: 20px; }
+        .um-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; }
+        .um-card-title { font-size: 14px; font-weight: 700; color: #111827; margin-bottom: 14px; }
+
+        .um-table { display: flex; flex-direction: column; }
+        .um-thead, .um-trow {
+          display: grid; grid-template-columns: 1.6fr 1.8fr 0.9fr 0.9fr 1fr;
+          gap: 12px; align-items: center; padding: 10px 8px;
+        }
+        .um-thead { font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #e5e7eb; }
+        .um-trow { border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+        .um-trow:last-child { border-bottom: none; }
+        .um-name { color: #111827; font-weight: 500; }
+        .um-sub { font-size: 11px; color: #9ca3af; font-weight: 400; }
+        .um-email { color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .um-role { padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+        .um-role--nutzer    { background: #f3f4f6; color: #374151; }
+        .um-role--moderator { background: #dbeafe; color: #1e40af; }
+        .um-role--admin     { background: #fef3c7; color: #92400e; }
+        .um-active { color: #059669; font-weight: 600; font-size: 12px; }
+        .um-banned { color: #dc2626; font-weight: 600; font-size: 12px; }
+        .um-nolabel { color: #d1d5db; }
+
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #d1fae5; border-radius: 2px; }
       `}</style>
@@ -715,6 +856,10 @@ export default function ModeratorPage() {
                   </div>
                 </>
               )
+            )}
+
+            {tab === 'users' && (
+              <UserManagement getToken={getToken} currentRole={currentRole} />
             )}
 
             {tab === 'reports' && (

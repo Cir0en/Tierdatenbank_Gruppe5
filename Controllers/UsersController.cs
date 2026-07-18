@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using TodoApi.DTOs;
+using TodoApi.Services;
 
 namespace TodoApi.Controllers;
 
@@ -22,12 +24,15 @@ public class UsersController : ControllerBase
 {
     private readonly NeondbContext _db;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ClerkUserProvisioningService _userProvisioning;
 
     public UsersController(NeondbContext db,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        ClerkUserProvisioningService userProvisioning)
     {
         _db = db;
         _httpClientFactory = httpClientFactory;
+        _userProvisioning = userProvisioning;
     }
 
     // Ermittelt den aktuell angemeldeten Nutzer und prüft, ob er die Rolle Admin hat sowie
@@ -42,6 +47,23 @@ public class UsersController : ControllerBase
         return await _db.Users.FirstOrDefaultAsync(user =>
             user.ClerkId == clerkId &&
             user.Role == "Admin" &&
+            !user.IsBanned &&
+            user.DeletedAt == null);
+    }
+
+    // Ermittelt den aktuell angemeldeten Nutzer und prüft, ob er die Rolle Moderator ODER Admin hat
+    // sowie weder gebannt noch (soft-)gelöscht ist. Basis für die erweiterten Moderator-Rechte
+    // (Accounts anlegen, Nutzer sperren). Gibt null zurück, wenn keine der beiden Rollen vorliegt.
+    private async Task<User?> GetCurrentModeratorOrAdminAsync()
+    {
+        var clerkId = User.FindFirst("sub")?.Value;
+
+        if (string.IsNullOrWhiteSpace(clerkId))
+            return null;
+
+        return await _db.Users.FirstOrDefaultAsync(user =>
+            user.ClerkId == clerkId &&
+            (user.Role == "Moderator" || user.Role == "Admin") &&
             !user.IsBanned &&
             user.DeletedAt == null);
     }
@@ -138,6 +160,110 @@ public class UsersController : ControllerBase
         return Ok(users);
     }
 
+    // GET /api/users/manage — Nutzerliste für die Moderator-Nutzerverwaltung (Moderator ODER Admin).
+    // Enthält den Sperrstatus, damit Moderatoren/Admins Nutzer gezielt sperren/entsperren können.
+    // Bewusst getrennt von GetAll (Admin-only), damit die dortige Admin-Sicht unverändert bleibt.
+    [HttpGet("manage")]
+    public async Task<IActionResult> GetManageableUsers()
+    {
+        var actor = await GetCurrentModeratorOrAdminAsync();
+        if (actor == null)
+            return Forbid();
+
+        var users = await _db.Users
+            .Where(user => user.DeletedAt == null)
+            .OrderBy(user => user.CreatedAt)
+            .Select(user => new
+            {
+                user.Id,
+                user.Username,
+                user.Email,
+                user.FirstName,
+                user.LastName,
+                user.Role,
+                user.CreatedAt,
+                user.IsBanned
+            })
+            .ToListAsync();
+
+        return Ok(users);
+    }
+
+    // POST /api/users — legt ein neues Nutzerkonto an (nur Admin). Das Konto wird zuerst bei Clerk
+    // erstellt (E-Mail + Passwort sind Pflicht) und danach lokal gespiegelt (Rolle "Nutzer").
+    // Neue Konten erhalten immer die niedrigste Rolle; ein Hochstufen bleibt Admins vorbehalten (UpdateRole).
+    [HttpPost]
+    public async Task<IActionResult> CreateUser([FromBody] CreateUserDto dto)
+    {
+        var actor = await GetCurrentAdminAsync();
+        if (actor == null)
+            return Forbid();
+
+        var email = dto.Email?.Trim();
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+            return BadRequest("Bitte eine gültige E-Mail-Adresse angeben.");
+
+        if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 8)
+            return BadRequest("Das Passwort muss mindestens 8 Zeichen lang sein.");
+
+        var username = string.IsNullOrWhiteSpace(dto.Username) ? null : dto.Username.Trim();
+        if (username != null && username.Length < 3)
+            return BadRequest("Der Benutzername muss mindestens 3 Zeichen lang sein.");
+
+        // Doppelte E-Mail/Benutzernamen frühzeitig lokal abfangen (Clerk würde sonst mit einem
+        // technischen Fehler antworten, den wir dem Nutzer nur schwer verständlich zurückgeben könnten).
+        if (await _db.Users.AnyAsync(u => u.Email == email && u.DeletedAt == null))
+            return BadRequest("Diese E-Mail-Adresse ist bereits vergeben.");
+        if (username != null && await _db.Users.AnyAsync(u => u.Username == username && u.DeletedAt == null))
+            return BadRequest("Dieser Benutzername ist bereits vergeben.");
+
+        var clerkClient = _httpClientFactory.CreateClient("Clerk");
+
+        // Clerk-Management-API: neues Konto mit E-Mail + Passwort anlegen. Nur nicht-leere
+        // optionale Felder mitschicken, damit Clerk sie nicht als leere Strings ablehnt.
+        var payload = new Dictionary<string, object>
+        {
+            ["email_address"] = new[] { email },
+            ["password"] = dto.Password,
+        };
+        if (username != null) payload["username"] = username;
+        if (!string.IsNullOrWhiteSpace(dto.FirstName)) payload["first_name"] = dto.FirstName.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.LastName)) payload["last_name"] = dto.LastName.Trim();
+
+        var clerkResponse = await clerkClient.PostAsJsonAsync("users", payload);
+        if (!clerkResponse.IsSuccessStatusCode)
+        {
+            var body = await clerkResponse.Content.ReadAsStringAsync();
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                $"Das Konto konnte bei Clerk nicht angelegt werden (evtl. ungültige/vergebene E-Mail, zu schwaches Passwort oder Benutzername nicht erlaubt). {body}");
+        }
+
+        using var created = JsonDocument.Parse(await clerkResponse.Content.ReadAsStreamAsync());
+        var clerkId = created.RootElement.GetProperty("id").GetString();
+        if (string.IsNullOrWhiteSpace(clerkId))
+            return StatusCode(StatusCodes.Status502BadGateway, "Clerk hat keine Nutzer-ID zurückgegeben.");
+
+        // Lokalen Datensatz anlegen (Rolle "Nutzer"). Verwendet dieselbe Provisioning-Logik wie der
+        // Webhook-Fallback, inkl. Behandlung von Race-Conditions, falls der Clerk-Webhook den Nutzer
+        // parallel bereits angelegt hat.
+        var localUser = await _userProvisioning.ProvisionFromClerkAsync(clerkId);
+        if (localUser == null)
+            return StatusCode(StatusCodes.Status502BadGateway, "Das Konto wurde bei Clerk angelegt, konnte lokal aber nicht gespeichert werden.");
+
+        return Ok(new
+        {
+            localUser.Id,
+            localUser.Username,
+            localUser.Email,
+            localUser.FirstName,
+            localUser.LastName,
+            localUser.Role,
+            localUser.CreatedAt,
+            localUser.IsBanned
+        });
+    }
+
     // PUT /api/users/{id}/role — Rolle ändern (nur Admin). Erlaubt sind nur die drei bekannten
     // Rollen; Admins dürfen ihre eigene Rolle nicht ändern (um sich nicht versehentlich selbst
     // die Admin-Rechte zu entziehen). Die Rolle wird zusätzlich in Clerk (public_metadata) gespiegelt,
@@ -199,15 +325,16 @@ public class UsersController : ControllerBase
         return Ok(new { targetUser.Id, targetUser.Role });
     }
 
-    // POST /api/users/{id}/ban — sperrt einen Nutzer (nur Admin). Admins können sich weder selbst
-    // noch andere Admins sperren (ein Admin muss vorher heruntergestuft werden); Sperrung wird
-    // zusätzlich bei Clerk durchgeführt, damit der Nutzer sich dort nicht mehr anmelden kann.
+    // POST /api/users/{id}/ban — sperrt einen Nutzer (Moderator ODER Admin). Niemand kann sich selbst
+    // sperren; Admins können nicht gesperrt werden (müssen vorher heruntergestuft werden). Moderatoren
+    // dürfen ausschließlich reguläre Nutzer sperren (nicht andere Moderatoren) — Admins auch Moderatoren.
+    // Die Sperrung wird zusätzlich bei Clerk durchgeführt, damit der Nutzer sich dort nicht mehr anmelden kann.
     [HttpPost("{id:int}/ban")]
     public async Task<IActionResult> BanUser(int id)
     {
-        var admin = await GetCurrentAdminAsync();
+        var actor = await GetCurrentModeratorOrAdminAsync();
 
-        if (admin == null)
+        if (actor == null)
             return Forbid();
 
         var targetUser = await _db.Users.FindAsync(id);
@@ -215,13 +342,19 @@ public class UsersController : ControllerBase
         if (targetUser == null || targetUser.DeletedAt != null)
             return NotFound("Benutzer wurde nicht gefunden.");
 
-        if (targetUser.Id == admin.Id)
+        if (targetUser.Id == actor.Id)
             return BadRequest("Du kannst dich nicht selbst sperren.");
 
         if (targetUser.Role == "Admin")
         {
             return BadRequest(
                 "Ein Administrator muss vor dem Sperren heruntergestuft werden.");
+        }
+
+        // Moderatoren dürfen nur reguläre Nutzer sperren, keine anderen Moderatoren.
+        if (actor.Role == "Moderator" && targetUser.Role != "Nutzer")
+        {
+            return BadRequest("Moderatoren dürfen nur reguläre Nutzer sperren.");
         }
 
         if (targetUser.IsBanned)
@@ -241,6 +374,11 @@ public class UsersController : ControllerBase
                 "Der Benutzer konnte in Clerk nicht gesperrt werden.");
         }
 
+        // Bereits bestehende Sessions widerrufen, damit ein aktuell eingeloggter Nutzer sofort
+        // ausgeloggt wird (das Clerk-Frontend erkennt den Widerruf und meldet ihn ab). Best-effort:
+        // schlägt der Widerruf fehl, bleibt die Sperre trotzdem bestehen (Login ist ohnehin blockiert).
+        await RevokeUserSessionsAsync(clerkClient, targetUser.ClerkId);
+
         targetUser.IsBanned = true;
         await _db.SaveChangesAsync();
 
@@ -251,20 +389,64 @@ public class UsersController : ControllerBase
         });
     }
 
-    // POST /api/users/{id}/unban — hebt die Sperrung eines Nutzers auf (nur Admin), sowohl lokal
-    // als auch bei Clerk.
+    // Widerruft alle aktiven Clerk-Sessions eines Nutzers, sodass er sofort ausgeloggt wird.
+    // Bewusst als Best-effort ausgelegt (Fehler werden geschluckt): das Sperren selbst darf daran
+    // nicht scheitern, und die UserStatusMiddleware blockiert gesperrte Nutzer ohnehin serverseitig.
+    private async Task RevokeUserSessionsAsync(HttpClient clerkClient, string clerkId)
+    {
+        try
+        {
+            var listResponse = await clerkClient.GetAsync(
+                $"sessions?user_id={Uri.EscapeDataString(clerkId)}&status=active");
+            if (!listResponse.IsSuccessStatusCode)
+                return;
+
+            using var doc = JsonDocument.Parse(await listResponse.Content.ReadAsStreamAsync());
+            var root = doc.RootElement;
+
+            // Clerk liefert je nach API-Version entweder direkt ein Array oder ein { data: [...] }-Objekt.
+            var sessions = root.ValueKind == JsonValueKind.Array
+                ? root
+                : (root.TryGetProperty("data", out var data) ? data : default);
+
+            if (sessions.ValueKind != JsonValueKind.Array)
+                return;
+
+            foreach (var session in sessions.EnumerateArray())
+            {
+                if (session.TryGetProperty("id", out var idElement) &&
+                    idElement.GetString() is { Length: > 0 } sessionId)
+                {
+                    await clerkClient.PostAsync(
+                        $"sessions/{Uri.EscapeDataString(sessionId)}/revoke", null);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort: Fehler beim Widerruf dürfen das Sperren nicht verhindern.
+        }
+    }
+
+    // POST /api/users/{id}/unban — hebt die Sperrung eines Nutzers auf (Moderator ODER Admin), sowohl
+    // lokal als auch bei Clerk. Moderatoren dürfen (analog zum Sperren) nur reguläre Nutzer entsperren.
     [HttpPost("{id:int}/unban")]
     public async Task<IActionResult> UnbanUser(int id)
     {
-        var admin = await GetCurrentAdminAsync();
+        var actor = await GetCurrentModeratorOrAdminAsync();
 
-        if (admin == null)
+        if (actor == null)
             return Forbid();
 
         var targetUser = await _db.Users.FindAsync(id);
 
         if (targetUser == null || targetUser.DeletedAt != null)
             return NotFound("Benutzer wurde nicht gefunden.");
+
+        if (actor.Role == "Moderator" && targetUser.Role != "Nutzer")
+        {
+            return BadRequest("Moderatoren dürfen nur reguläre Nutzer entsperren.");
+        }
 
         if (!targetUser.IsBanned)
             return BadRequest("Der Benutzer ist nicht gesperrt.");

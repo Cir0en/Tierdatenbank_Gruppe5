@@ -37,7 +37,7 @@ type Props = {
 export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
   const { user, isLoaded } = useUser();
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, getToken, signOut } = useAuth();
   const [open, setOpen] = useState(true);
   const [dbRole, setDbRole] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
@@ -72,6 +72,13 @@ export default function Navbar({ activeNav: activeProp }: Props) {
         const meRes = await fetch(`${API}/api/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        // Wurde der Nutzer inzwischen gesperrt (oder gelöscht), antwortet die
+        // UserStatusMiddleware mit 403 — dann den Nutzer sofort ausloggen und zum
+        // Login schicken, statt ihn mit dauerhaft fehlschlagenden Aufrufen "eingeloggt" zu lassen.
+        if (meRes.status === 403) {
+          if (!cancelled) { await signOut(); router.replace('/login'); }
+          return;
+        }
         if (!meRes.ok || cancelled) return;
         const me = await meRes.json();
         const role: string = me.role ?? "Nutzer";
@@ -143,7 +150,7 @@ export default function Navbar({ activeNav: activeProp }: Props) {
     refresh();
     const interval = setInterval(refresh, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [isLoaded, isSignedIn, getToken, user?.id]);
+  }, [isLoaded, isSignedIn, getToken, user?.id, signOut, router]);
 
   // Aktiver Nav-Punkt: entweder explizit von der Seite über die `activeNav`-Prop
   // vorgegeben, oder anhand des aktuellen Next.js-Routen-Pfads ermittelt
