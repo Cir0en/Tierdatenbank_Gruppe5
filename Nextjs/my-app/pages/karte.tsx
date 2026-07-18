@@ -89,6 +89,9 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   const [nameErr, setNameErr]       = useState(false);
   const [collectionErr, setCollectionErr] = useState(false);
   const [collections, setCollections] = useState<CollectionOption[]>([]);
+  const fallbackLocationName = `Naturstandort (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)})`;
+  const [locationNameInput, setLocationNameInput] = useState(locationName ?? fallbackLocationName);
+
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
 
   const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
@@ -198,7 +201,7 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           latitude:     coords.lat,
           longitude:    coords.lng,
-          locationName: locationName,
+          locationName: locationNameInput.trim() || fallbackLocationName,
           description:  description.trim() || null,
           status:       seltenheit || null,
           lebensraum:   lebensraum.trim() || null,
@@ -209,7 +212,7 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       const saved = await res.json();
-      onSaved(displayName.trim(), sex, saved.id, locationName ?? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+      onSaved(displayName.trim(), sex, saved.id, locationNameInput.trim() || fallbackLocationName);
     } catch (err: any) {
       setError(err.message);
       setSaving(false);
@@ -321,6 +324,20 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
               )}
             </div>
           )}
+
+          <div className="tp-group">
+            <label className="tp-label">Fundort</label>
+            <input
+              className="tp-input"
+              type="text"
+              value={locationNameInput}
+              onChange={e => setLocationNameInput(e.target.value)}
+              placeholder="z. B. Buchenwald oberhalb der Siegquelle"
+            />
+            <span className="tp-hint">
+              Automatisch aus den Koordinaten vorgeschlagen. Du kannst den Fundort anpassen.
+            </span>
+          </div>
 
           <div className="tp-group">
             <label className="tp-label">Beschreibung</label>
@@ -441,19 +458,108 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
 
 // ── Hilfsfunktion für Reverse Geocoding  ────────────────────────────────────────────────────────────────
 
-async function reverseGeocode(lng: number, lat: number): Promise<string> {
+// Neue Version für Reverse Geocoding, die Entfernung und Fallback berücksichtigt:
+// Warum? Weil die MapTiler-Geocoding-API manchmal einen Ort liefert,
+// der weit entfernt von den tatsächlichen Koordinaten liegt (z. B. wenn Fundort
+// in einem Waldgebiet ist, das keine genaue Adresse hat),
+// und wir möchten, dass die Anzeige in diesem Fall
+// "In der Nähe von ..." oder "Naturstandort bei ..." anzeigt,
+// statt eine ungenaue Adresse zu verwenden.
+
+interface ReverseGeocodeResult {
+  locationName: string;
+  distanceMeters: number | null;
+  isPrecise: boolean;
+}
+
+function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const earthRadius = 6371000;
+  const toRad = (v: number) => v * Math.PI / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) *
+    Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function reverseGeocode(lng: number, lat: number): Promise<ReverseGeocodeResult> {
   const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const roundedLng = lng.toFixed(6);
+  const roundedLat = lat.toFixed(6);
   const url =
-    `https://api.maptiler.com/geocoding/${lng},${lat}.json` +
-    `?key=${key}&language=de&limit=1`;
+    `https://api.maptiler.com/geocoding/${roundedLng},${roundedLat}.json` +
+    `?key=${key}&language=de`;
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error('Adresse konnte nicht ermittelt werden');
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('MapTiler Reverse Geocoding Fehler:', res.status, errorText);
+    throw new Error('Adresse konnte nicht ermittelt werden');
+  }
 
   const data = await res.json();
-  return data.features?.[0]?.place_name_de
-    ?? data.features?.[0]?.place_name
-    ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  const features = data.features ?? [];
+
+  console.log(features.map((f: any) => ({
+  id: f.id,
+  text: f.text_de ?? f.text,
+  placeName: f.place_name_de ?? f.place_name,
+  placeType: f.place_type,
+  center: f.center,
+})));
+
+  if (features.length === 0) {
+    return {
+      locationName: `Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      distanceMeters: null,
+      isPrecise: false,
+    };
+  }
+
+  const best = features[0];
+  const [foundLng, foundLat] = best.center ?? [lng, lat];
+  const distance = distanceMeters(lng, lat, foundLng, foundLat);
+
+  const placeName =
+    best.place_name_de ??
+    best.place_name ??
+    best.text_de ??
+    best.text ??
+    'unbekannter Ort';
+
+  if (distance <= 100) {
+    return {
+      locationName: placeName,
+      distanceMeters: distance,
+      isPrecise: true,
+    };
+  }
+
+  if (distance <= 500) {
+    return {
+      locationName: `In der Nähe von ${placeName}`,
+      distanceMeters: distance,
+      isPrecise: false,
+    };
+  }
+
+  const shortPlace =
+    best.text_de ??
+    best.text ??
+    placeName;
+
+  return {
+    locationName: `Naturstandort bei ${shortPlace} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+    distanceMeters: distance,
+    isPrecise: false,
+  };
 }
 
 // ── Hauptseite ────────────────────────────────────────────────────────────────
@@ -685,12 +791,13 @@ export default function MapPage() {
         return;
       }
 
-
+// reverseGeocode liefert jetzt ein Objekt 
       try {
-        const address = await reverseGeocode(lng, lat);
-        setFormLocationName(address);
-      } catch {
-        setFormLocationName(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        const result = await reverseGeocode(lng, lat);
+        setFormLocationName(result.locationName);
+      } catch (err) {
+        console.error('Reverse Geocoding fehlgeschlagen:', err);
+        setFormLocationName(`Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
       }
 
       openFormRef.current?.(lng, lat);
