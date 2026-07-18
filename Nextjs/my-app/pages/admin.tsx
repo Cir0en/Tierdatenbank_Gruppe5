@@ -473,7 +473,7 @@ export default function AdminPage() {
         .rb--inactive { background: #fef3c7; color: #92400e; }
 
         /* Konto anlegen */
-        .ca-card { margin-bottom: 20px; }
+        .ca-card { margin-bottom: 20px; flex-shrink: 0; }
         .ca-err { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
         .ca-ok  { font-size: 12px; color: #065f46; background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
         .ca-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }

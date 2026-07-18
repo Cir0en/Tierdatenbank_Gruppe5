@@ -25,13 +25,17 @@ interface GbifTaxonomy {
 }
 interface GbifMatchResult {
   status: 'match_found';
-  usageKey: number;
-  confidence: number;
+  source?: 'gbif' | 'local';
+  usageKey?: number;
+  taxonomyId?: number;
+  confidence?: number;
   canonicalName: string;
   taxonomy: GbifTaxonomy;
 }
 interface GbifSuggestion {
+  source?: 'gbif' | 'local';
   usageKey?: number;
+  taxonomyId?: number;
   scientificName?: string;
   canonicalName?: string;
   rank?: string;
@@ -154,6 +158,15 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
     }
   };
 
+  // Übernimmt einen lokalen Treffer/Vorschlag direkt: der Taxonomie-Eintrag existiert
+  // bereits in der Datenbank (manuell eingereicht und freigegeben), daher ist anders als
+  // bei GBIF-Treffern kein Bestätigungs-Request nötig.
+  const selectLocalTaxonomy = (id: number, displayName: string) => {
+    setTaxonomyId(id);
+    setConfirmedName(displayName);
+    setGbifResult(null);
+  };
+
   // Validiert minimal (Name erforderlich) und legt das neue Tier inkl.
   // Koordinaten per POST an. Bei Erfolg wird onSaved() aufgerufen, damit die
   // Elternkomponente (MapPage) direkt einen Marker an der geklickten Position
@@ -257,11 +270,13 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
             </div>
           )}
 
-          {/* GBIF Treffer */}
+          {/* GBIF/lokaler Treffer */}
           {matchResult && (
             <div className="tp-gbif-preview">
               <div className="tp-gbif-preview-title">
-                GBIF-Treffer — {matchResult.confidence}% Übereinstimmung
+                {matchResult.source === 'local'
+                  ? 'Bereits in der Datenbank vorhanden'
+                  : `GBIF-Treffer — ${matchResult.confidence}% Übereinstimmung`}
               </div>
               <div className="tp-gbif-chain">
                 {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
@@ -275,24 +290,29 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
                 ))}
               </div>
               <button type="button" className="tp-btn-gbif-accept" disabled={confirming}
-                onClick={() => handleGbifConfirm(matchResult.usageKey, matchResult.canonicalName)}>
+                onClick={() => matchResult.source === 'local' && matchResult.taxonomyId
+                  ? selectLocalTaxonomy(matchResult.taxonomyId, matchResult.canonicalName)
+                  : handleGbifConfirm(matchResult.usageKey!, matchResult.canonicalName)}>
                 {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
               </button>
             </div>
           )}
 
-          {/* GBIF Vorschläge */}
+          {/* GBIF/lokale Vorschläge */}
           {needsConfirm && (
             <div className="tp-gbif-preview tp-gbif-preview--warn">
               <div className="tp-gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
-              {needsConfirm.suggestions.filter(s => s.usageKey).length > 0 ? (
+              {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).length > 0 ? (
                 <>
                   <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
-                  {needsConfirm.suggestions.filter(s => s.usageKey).map((s, i) => (
+                  {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).map((s, i) => (
                     <button key={i} type="button" className="tp-btn-gbif-suggestion" disabled={confirming}
-                      onClick={() => handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                      onClick={() => s.source === 'local' && s.taxonomyId
+                        ? selectLocalTaxonomy(s.taxonomyId, s.canonicalName ?? s.scientificName ?? 'Unbekannt')
+                        : handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
                       <em>{s.canonicalName ?? s.scientificName}</em>
                       {s.rank && <span className="tp-gbif-rank"> [{s.rank}]</span>}
+                      {s.source === 'local' && <span className="tp-gbif-rank"> · lokal</span>}
                     </button>
                   ))}
                 </>

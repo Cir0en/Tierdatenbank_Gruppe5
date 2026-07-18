@@ -42,6 +42,47 @@ namespace TodoApi.Controllers
                 && !string.IsNullOrWhiteSpace(gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName);
         }
 
+        // Sucht in der lokalen Datenbank nach einer bereits freigegebenen Art mit exakt diesem
+        // Namen (unabhängig von Groß-/Kleinschreibung). Manuell eingereichte und genehmigte
+        // Taxonomien sind nie bei GBIF registriert, daher muss die lokale Datenbank zusätzlich
+        // zur externen GBIF-Suche durchsucht werden — sonst sind solche Arten über die
+        // GBIF-Suche nie wieder auffindbar.
+        private async Task<Taxonomy?> FindLocalArtExactAsync(string speciesName)
+        {
+            var normalized = speciesName.Trim().ToLower();
+            return await _context.Taxonomies
+                .FirstOrDefaultAsync(t => t.Rank == "Art" && t.IsApproved == true
+                    && t.Name.ToLower() == normalized);
+        }
+
+        // Sucht bis zu "limit" freigegebene lokale Arten, deren Name den Suchbegriff enthält
+        // (für die Vorschlagsliste, wenn kein eindeutiger Treffer vorliegt).
+        private async Task<List<Taxonomy>> FindLocalArtSuggestionsAsync(string speciesName, int limit)
+        {
+            var normalized = speciesName.Trim().ToLower();
+            return await _context.Taxonomies
+                .Where(t => t.Rank == "Art" && t.IsApproved == true && t.Name.ToLower().Contains(normalized))
+                .Take(limit)
+                .ToListAsync();
+        }
+
+        // Baut aus einem lokalen Taxonomie-Blattknoten (Art) die vollständige Rangkette
+        // (Stamm...Art) durch Verfolgen der ParentId-Kette nach oben auf — Pendant zu den
+        // von GBIF gelieferten Rang-Feldern.
+        private async Task<Dictionary<string, string>> BuildLocalRankChainAsync(Taxonomy leaf)
+        {
+            var result = new Dictionary<string, string>();
+            Taxonomy? current = leaf;
+            while (current != null)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Rank))
+                    result[current.Rank!] = current.Name;
+                if (current.ParentId == null) break;
+                current = await _context.Taxonomies.FindAsync(current.ParentId.Value);
+            }
+            return result;
+        }
+
         // Legt (bzw. findet) die komplette Taxonomie-Kette für ein von GBIF geliefertes Taxon an,
         // indem die GBIF-Felder auf die interne Rangkette (Stamm...Art) gemappt werden.
         private async Task<Taxonomy> CreateChainFromGbifAsync(GbifSpeciesDto gbif)
@@ -212,9 +253,38 @@ namespace TodoApi.Controllers
             if (string.IsNullOrWhiteSpace(dto.SpeciesName))
                 return BadRequest("Artname ist erforderlich.");
 
-            var client = _httpClientFactory.CreateClient("Gbif");
-
             var speciesName = dto.SpeciesName.Trim();
+
+            // Manuell eingereichte und freigegebene Taxonomien sind nie bei GBIF registriert —
+            // zuerst die lokale Datenbank auf einen exakten Treffer prüfen, bevor die externe
+            // GBIF-API gefragt wird. Ist ein solcher Eintrag vorhanden, kann er direkt (ohne
+            // GBIF-Bestätigungsschritt) übernommen werden.
+            var localExact = await FindLocalArtExactAsync(speciesName);
+            if (localExact != null)
+            {
+                var localChain = await BuildLocalRankChainAsync(localExact);
+                return Ok(new
+                {
+                    status = "match_found",
+                    source = "local",
+                    taxonomyId = localExact.Id,
+                    input = speciesName,
+                    scientificName = localExact.Name,
+                    canonicalName = localExact.Name,
+                    taxonomy = new
+                    {
+                        reich = "Animalia",
+                        stamm = localChain.GetValueOrDefault("Stamm"),
+                        klasse = localChain.GetValueOrDefault("Klasse"),
+                        ordnung = localChain.GetValueOrDefault("Ordnung"),
+                        familie = localChain.GetValueOrDefault("Familie"),
+                        gattung = localChain.GetValueOrDefault("Gattung"),
+                        art = localChain.GetValueOrDefault("Art")
+                    }
+                });
+            }
+
+            var client = _httpClientFactory.CreateClient("Gbif");
 
             var matchUrl =
                 $"species/match?name={Uri.EscapeDataString(speciesName)}&kingdom=Animalia&rank=SPECIES&verbose=true";
@@ -237,6 +307,7 @@ namespace TodoApi.Controllers
                 return Ok(new
                 {
                     status = "match_found",
+                    source = "gbif",
                     UsageKey = gbif!.UsageKey,
                     input = speciesName,
                     confidence = gbif.Confidence,
@@ -271,24 +342,14 @@ namespace TodoApi.Controllers
             // HasCompleteAnimalTaxonomy). Sonst könnte der Nutzer einen Vorschlag anklicken, der
             // serverseitig doch abgelehnt wird (Non-Animalia-Namensgleichheit oder bei GBIF
             // unvollständige Klassifikation, z.B. fehlende Ordnung).
-            var suggestions = rawSuggestions
+            var gbifSuggestions = rawSuggestions
                 .Where(s => string.Equals(s.Kingdom, "Animalia", StringComparison.OrdinalIgnoreCase)
                             && HasCompleteAnimalTaxonomy(s))
-                .Take(5)
-                .ToList();
-
-            return Ok(new
-            {
-                status = "needs_confirmation",
-                message = suggestions.Count > 0
-                    ? "Keine sichere GBIF-Übereinstimmung gefunden."
-                    : "Keine passende Tier-Art bei GBIF gefunden. GBIF durchsucht primär wissenschaftliche " +
-                      "(lateinische) Namen — versuche es damit, oder reiche die Art manuell ein.",
-                input = speciesName,
-                gbifMatch = gbif,
-                suggestions = suggestions.Select(s => new
+                .Select(s => new
                 {
-                    usageKey = s.Key ?? s.UsageKey,
+                    source = "gbif",
+                    usageKey = (int?)(s.Key ?? s.UsageKey),
+                    taxonomyId = (int?)null,
                     s.ScientificName,
                     s.CanonicalName,
                     s.Rank,
@@ -301,6 +362,51 @@ namespace TodoApi.Controllers
                     s.Genus,
                     s.Species
                 })
+                .ToList();
+
+            // Zusätzlich lokale (manuell eingereichte, bereits freigegebene) Arten vorschlagen,
+            // deren Name den Suchbegriff enthält — sonst bleiben lokal gespeicherte, aber bei
+            // GBIF unbekannte Taxonomien über diese Suche unauffindbar.
+            var localMatches = await FindLocalArtSuggestionsAsync(speciesName, 5);
+            var localSuggestions = new List<object>();
+            foreach (var loc in localMatches)
+            {
+                var chain = await BuildLocalRankChainAsync(loc);
+                localSuggestions.Add(new
+                {
+                    source = "local",
+                    usageKey = (int?)null,
+                    taxonomyId = (int?)loc.Id,
+                    ScientificName = loc.Name,
+                    CanonicalName = loc.Name,
+                    Rank = loc.Rank,
+                    Status = (string?)null,
+                    Kingdom = "Animalia",
+                    Phylum = chain.GetValueOrDefault("Stamm"),
+                    className = chain.GetValueOrDefault("Klasse"),
+                    Order = chain.GetValueOrDefault("Ordnung"),
+                    Family = chain.GetValueOrDefault("Familie"),
+                    Genus = chain.GetValueOrDefault("Gattung"),
+                    Species = chain.GetValueOrDefault("Art")
+                });
+            }
+
+            // Lokale Treffer zuerst, da sie bereits innerhalb der App geprüft/freigegeben wurden.
+            var suggestions = localSuggestions
+                .Concat(gbifSuggestions.Cast<object>())
+                .Take(5)
+                .ToList();
+
+            return Ok(new
+            {
+                status = "needs_confirmation",
+                message = suggestions.Count > 0
+                    ? "Keine sichere GBIF-Übereinstimmung gefunden."
+                    : "Keine passende Tier-Art bei GBIF gefunden. GBIF durchsucht primär wissenschaftliche " +
+                      "(lateinische) Namen — versuche es damit, oder reiche die Art manuell ein.",
+                input = speciesName,
+                gbifMatch = gbif,
+                suggestions
             });
         }
 
