@@ -94,6 +94,82 @@ function statusBadge(status: string | null) {
   }
 }
 
+interface ReverseGeocodeResult {
+  locationName: string;
+  distanceMeters: number | null;
+  isPrecise: boolean;
+}
+
+function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const earthRadius = 6371000;
+  const toRad = (v: number) => v * Math.PI / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) *
+    Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function reverseGeocode(lng: number, lat: number): Promise<ReverseGeocodeResult> {
+  const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const roundedLng = lng.toFixed(6);
+  const roundedLat = lat.toFixed(6);
+  const url =
+    `https://api.maptiler.com/geocoding/${roundedLng},${roundedLat}.json` +
+    `?key=${key}&language=de`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('MapTiler Reverse Geocoding Fehler:', res.status, errorText);
+    throw new Error('Adresse konnte nicht ermittelt werden');
+  }
+
+  const data = await res.json();
+  const features = data.features ?? [];
+
+  if (features.length === 0) {
+    return {
+      locationName: `Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      distanceMeters: null,
+      isPrecise: false,
+    };
+  }
+
+  const best = features[0];
+  const [foundLng, foundLat] = best.center ?? [lng, lat];
+  const distance = distanceMeters(lng, lat, foundLng, foundLat);
+
+  const placeName =
+    best.place_name_de ??
+    best.place_name ??
+    best.text_de ??
+    best.text ??
+    'unbekannter Ort';
+
+  if (distance <= 100) {
+    return { locationName: placeName, distanceMeters: distance, isPrecise: true };
+  }
+
+  if (distance <= 500) {
+    return { locationName: `In der Nähe von ${placeName}`, distanceMeters: distance, isPrecise: false };
+  }
+
+  const shortPlace = best.text_de ?? best.text ?? placeName;
+  return {
+    locationName: `Naturstandort bei ${shortPlace} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+    distanceMeters: distance,
+    isPrecise: false,
+  };
+}
+
 // ── Create Modal ───────────────────────────────────────────────────────────────
 
 // Modal zum Anlegen einer neuen Sammlung (Name, Beschreibung, Sichtbarkeit).
@@ -513,6 +589,9 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   const [showCoords, setShowCoords] = useState(false);
   const [latitude, setLatitude]     = useState('');
   const [longitude, setLongitude]   = useState('');
+  const [locationName, setLocationName] = useState('');
+  const [locationNameTouched, setLocationNameTouched] = useState(false);
+  const [locationLookupLoading, setLocationLookupLoading] = useState(false);
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
@@ -585,6 +664,34 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
     setGbifResult(null);
   };
 
+  useEffect(() => {
+    if (!showCoords || locationNameTouched) return;
+
+    const lat = latitude.trim() ? parseFloat(latitude) : null;
+    const lng = longitude.trim() ? parseFloat(longitude) : null;
+    if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setLocationLookupLoading(true);
+      try {
+        const result = await reverseGeocode(lng, lat);
+        if (!cancelled) setLocationName(result.locationName);
+      } catch (err) {
+        console.error('Reverse Geocoding fehlgeschlagen:', err);
+        if (!cancelled) setLocationName(`Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+      } finally {
+        if (!cancelled) setLocationLookupLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [showCoords, latitude, longitude, locationNameTouched]);
+
   // Speichert das neue Tier mit allen Formularfeldern (inkl. optionaler
   // taxonomyId aus dem GBIF-Workflow) im Backend. Leere/„Unbekannt"-Werte
   // werden bewusst als null statt als leerer String übergeben.
@@ -628,6 +735,7 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
           status:       seltenheit || null,
           latitude:     lat,
           longitude:    lng,
+          locationName:  locationName.trim() || null,
           collectionId,
         }),
       });
@@ -655,6 +763,19 @@ function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
             placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
             value={displayName}
             onChange={e => setDisplayName(e.target.value)} />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Fundort</label>
+          <input type="text" className="form-input"
+            placeholder="z. B. Buchenwald oberhalb der Siegquelle"
+            value={locationName}
+            onChange={e => { setLocationName(e.target.value); setLocationNameTouched(true); }} />
+          <div className="gbif-hint">
+            {locationLookupLoading
+              ? 'Fundort wird aus den Koordinaten ermittelt...'
+              : 'Wird bei Koordinaten automatisch vorgeschlagen und kann angepasst werden.'}
+          </div>
         </div>
 
         {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
