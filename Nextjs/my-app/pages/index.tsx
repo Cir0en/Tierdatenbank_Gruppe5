@@ -748,9 +748,10 @@ export default function HomePage() {
                   </div>
                   <div className="card">
                     <div className="action-grid">
-                      {/* "Neues Objekt" nur für eingeloggte Nutzer sichtbar */}
+                      {/* "Neues Objekt" nur für eingeloggte Nutzer sichtbar; führt zur Sammlungs-
+                          Übersicht, wo das Tier über "+ Tier hinzufügen" in einer eigenen Sammlung angelegt wird. */}
                       {isSignedIn && (
-                        <Link href="/tierliste/neu" className="action-btn">
+                        <Link href="/Sammlung" className="action-btn">
                           <span className="action-icon">＋</span>
                           <span className="action-label">Neues Objekt</span>
                           <span className="action-desc">Tier oder Insekt erfassen</span>

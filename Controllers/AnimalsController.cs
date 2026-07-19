@@ -37,7 +37,7 @@ namespace TodoApi.Controllers
         }
 
         // GET /api/animals/{id} — Detailansicht eines Fundobjekts inkl. Taxonomie, Sammlung und Fundort;
-        // enthält zusätzlich canEdit/canDelete für den anfragenden Nutzer (siehe CanModifyItem), damit
+        // enthält zusätzlich canEdit/canDelete für den anfragenden Nutzer (siehe CanEditItem/CanDeleteItem), damit
         // das Frontend den Bearbeiten-/Löschen-Button nur bei Berechtigung anzeigt.
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetAnimal(int id)
@@ -51,7 +51,10 @@ namespace TodoApi.Controllers
             if (obj == null) return NotFound();
 
             var currentUser = await GetCurrentUserAsync();
-            var canModify = currentUser != null && CanModifyItem(currentUser, obj);
+            // Bearbeiten: nur Eigentümer der Sammlung oder Admin. Löschen: zusätzlich Moderator/Ersteller
+            // (Moderationsfunktion) — deshalb getrennte Flags.
+            var canEdit = currentUser != null && CanEditItem(currentUser, obj);
+            var canDelete = currentUser != null && CanDeleteItem(currentUser, obj);
 
             return Ok(new
             {
@@ -73,8 +76,8 @@ namespace TodoApi.Controllers
                 Taxonomy = obj.Taxonomy == null ? null : new { obj.Taxonomy.Id, obj.Taxonomy.Name, obj.Taxonomy.Rank },
                 Collection = obj.Collection == null ? null : new { obj.Collection.Id, obj.Collection.Name },
                 FindingLocation = obj.FindingLocation == null ? null : new { obj.FindingLocation.Id, obj.FindingLocation.Name, obj.FindingLocation.Latitude, obj.FindingLocation.Longitude },
-                CanEdit = canModify,
-                CanDelete = canModify,
+                CanEdit = canEdit,
+                CanDelete = canDelete,
             });
         }
 
@@ -401,21 +404,34 @@ namespace TodoApi.Controllers
         public async Task<ActionResult<CollectItem>> CreateAnimal(CreateAnimalDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
 
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
                 return BadRequest("Name fehlt");
             }
 
-            if (dto.CollectionId.HasValue)
+            // Sammlung ist Pflicht und der Nutzer darf Tiere nur in seine EIGENE Sammlung anlegen
+            // (Admin ausgenommen). Moderatoren dürfen ausdrücklich NICHT in fremden Sammlungen anlegen.
+            if (!dto.CollectionId.HasValue)
             {
-                var collectionExists = await _context.Collections
-                    .AnyAsync(c => c.Id == dto.CollectionId.Value);
+                return BadRequest("Sammlung ist erforderlich");
+            }
 
-                if (!collectionExists)
-                {
-                    return BadRequest("Collection existiert nicht");
-                }
+            var collection = await _context.Collections
+                .FirstOrDefaultAsync(c => c.Id == dto.CollectionId.Value);
+
+            if (collection == null)
+            {
+                return BadRequest("Collection existiert nicht");
+            }
+
+            if (!CanManageCollection(currentUser, collection))
+            {
+                return Forbid();
             }
 
             if (dto.TaxonomyId.HasValue)
@@ -470,10 +486,26 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
         }
 
-        // Bearbeitungs-/Löschrecht für ein Fundobjekt: Admin/Moderator oder der Nutzer, der den
-        // Eintrag angelegt hat (CreatedByUserId). Gemeinsam genutzt von GetAnimal (canEdit/canDelete-
-        // Flags), UpdateAnimal und DeleteAnimal, damit alle drei Aktionen dieselbe Regel anwenden.
-        private static bool CanModifyItem(User user, CollectItem item)
+        // Verwaltungsrecht für eine Sammlung (Tiere anlegen/bearbeiten): nur der Eigentümer der
+        // Sammlung oder ein Admin. Moderatoren dürfen fremde Sammlungen ausdrücklich NICHT verwalten
+        // (nur ihre eigenen). Grundlage für das Anlegen von Tieren (CreateAnimal/CreateMapAnimal).
+        private static bool CanManageCollection(User user, Collection collection)
+        {
+            return user.Role == "Admin" || collection.UserId == user.Id;
+        }
+
+        // Bearbeitungsrecht für ein bestehendes Fundobjekt: nur der Eigentümer der zugehörigen Sammlung
+        // oder ein Admin (Moderatoren dürfen fremde Sammlungen nicht bearbeiten). Setzt voraus, dass
+        // item.Collection geladen ist. Objekte ohne Sammlung sind nur für Admins bearbeitbar.
+        private static bool CanEditItem(User user, CollectItem item)
+        {
+            return user.Role == "Admin" || (item.Collection != null && item.Collection.UserId == user.Id);
+        }
+
+        // Löschrecht für ein Fundobjekt: Admin/Moderator (Moderationsfunktion) oder der Nutzer, der den
+        // Eintrag angelegt hat (CreatedByUserId). Bewusst getrennt vom Bearbeitungsrecht — das Löschen
+        // als Moderationsmaßnahme bleibt Moderatoren erhalten, das Bearbeiten fremder Sammlungen nicht.
+        private static bool CanDeleteItem(User user, CollectItem item)
         {
             var isModerator = user.Role == "Admin" || user.Role == "Moderator";
             var isCreator = item.CreatedByUserId.HasValue && item.CreatedByUserId == user.Id;
@@ -507,6 +539,10 @@ namespace TodoApi.Controllers
         public async Task<ActionResult<CollectItem>> CreateMapAnimal(CreateMapAnimalDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
 
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
@@ -538,12 +574,9 @@ namespace TodoApi.Controllers
                 return BadRequest("Collection existiert nicht");
             }
 
-            // Ist der Nutzer identifizierbar, darf er nur in seine eigenen Sammlungen einordnen
-            // (Admin/Moderator ausgenommen). Anonyme Anfragen bleiben wie bisher zugelassen.
-            if (currentUser != null
-                && collection.UserId != currentUser.Id
-                && currentUser.Role != "Admin"
-                && currentUser.Role != "Moderator")
+            // Der Nutzer darf Tiere nur in seine EIGENE Sammlung einordnen (Admin ausgenommen).
+            // Moderatoren dürfen ausdrücklich NICHT in fremden Sammlungen anlegen.
+            if (!CanManageCollection(currentUser, collection))
             {
                 return Forbid();
             }
@@ -586,8 +619,8 @@ namespace TodoApi.Controllers
         }
 
         // PUT /api/animals/{id} — bearbeitet ein bestehendes Fundobjekt (Stammdaten + Taxonomie +
-        // optionale Koordinaten). Dieselbe Berechtigung wie beim Löschen (siehe CanModifyItem):
-        // nur Admin/Moderator oder der Nutzer, der den Eintrag angelegt hat, dürfen bearbeiten.
+        // optionale Koordinaten). Bearbeiten darf nur der Eigentümer der zugehörigen Sammlung oder ein
+        // Admin (siehe CanEditItem) — Moderatoren dürfen fremde Sammlungen ausdrücklich NICHT bearbeiten.
         // Koordinaten werden wie bei CreateAnimal/CreateMapAnimal über GetOrCreateLocationAsync
         // aufgelöst statt einen evtl. von anderen Objekten geteilten Fundort direkt zu verändern;
         // werden beide Koordinaten weggelassen, verliert das Objekt seinen Fundort.
@@ -601,13 +634,15 @@ namespace TodoApi.Controllers
                 return Unauthorized();
             }
 
-            var item = await _context.CollectItems.FindAsync(id);
+            var item = await _context.CollectItems
+                .Include(i => i.Collection)
+                .FirstOrDefaultAsync(i => i.Id == id);
             if (item == null)
             {
                 return NotFound();
             }
 
-            if (!CanModifyItem(currentUser, item))
+            if (!CanEditItem(currentUser, item))
             {
                 return Forbid();
             }
@@ -680,7 +715,7 @@ namespace TodoApi.Controllers
                 return NotFound();
             }
 
-            if (!CanModifyItem(currentUser, item))
+            if (!CanDeleteItem(currentUser, item))
             {
                 return Forbid();
             }

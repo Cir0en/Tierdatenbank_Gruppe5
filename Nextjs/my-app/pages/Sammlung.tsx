@@ -1007,7 +1007,9 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
         <div className="detail-header-info">
           <div className="detail-title-row">
             <div className="detail-title">{detail.name}</div>
-            {isSignedIn && (
+            {/* Tiere hinzufügen darf nur der Eigentümer der Sammlung oder ein Admin (detail.canEdit,
+                siehe CollectionController) — nicht in fremden (auch nicht öffentlichen) Sammlungen. */}
+            {isSignedIn && detail.canEdit && (
               <button className="btn-add-animal" onClick={() => setShowAddModal(true)}>
                 + Tier hinzufügen
               </button>
