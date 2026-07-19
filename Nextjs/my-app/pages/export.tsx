@@ -682,7 +682,7 @@ export default function EinstellungenPage() {
                 <div className="card-head">📤 Export</div>
                 <div className="card-body">
                   <p className="export-desc">
-                    Exportiere alle Sammlungsobjekte als CSV-Datei. Die Datei enthält Name, Status, Taxonomie, Fundort, Maße und weitere Felder.
+                    Exportiere alle Sammlungsobjekte als CSV-Datei. Die Datei enthält Name, Status, Taxonomie, Fundort inkl. Koordinaten (Breitengrad/Laengengrad), Maße und weitere Felder.
                   </p>
                   <div className="export-row">
                     <button className="btn-export" onClick={handleCsvDownload} disabled={exporting}>
@@ -698,7 +698,7 @@ export default function EinstellungenPage() {
                   <div className="card-head">📥 Import</div>
                   <div className="card-body">
                     <p className="export-desc">
-                      Importiere Fundobjekte aus einer CSV-Datei (gleiches Spaltenformat wie der Export). Taxonomie, Sammlung und Fundort werden anhand des Namens wiederverwendet oder neu angelegt.
+                      Importiere Fundobjekte aus einer CSV-Datei (gleiches Spaltenformat wie der Export). Taxonomie, Sammlung und Fundort werden anhand des Namens wiederverwendet oder neu angelegt. Enthält die Datei die Spalten <strong>Breitengrad</strong> und <strong>Laengengrad</strong>, erscheinen die importierten Einträge auch auf der Karte.
                     </p>
                     <div className="export-row">
                       <button

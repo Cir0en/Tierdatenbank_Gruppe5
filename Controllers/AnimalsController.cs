@@ -119,7 +119,9 @@ namespace TodoApi.Controllers
                     ? $"\"{v.Replace("\"", "\"\"")}\"" : v;
 
             var sb = new StringBuilder();
-            sb.AppendLine("ID,Name,Status,Geschlecht,Altersklasse,Funddatum,Koerpermasse_g,Koerperlaenge_mm,Art,Gattung,Familie,Ordnung,Klasse,Stamm,Sammlung,Fundort,Beschreibung,Aufbewahrungsort");
+            // Breitengrad/Laengengrad werden mitexportiert, damit ein späterer Import den Fundort MIT
+            // Koordinaten wiederherstellen kann und die Einträge dann auf der Karte erscheinen.
+            sb.AppendLine("ID,Name,Status,Geschlecht,Altersklasse,Funddatum,Koerpermasse_g,Koerperlaenge_mm,Art,Gattung,Familie,Ordnung,Klasse,Stamm,Sammlung,Fundort,Breitengrad,Laengengrad,Beschreibung,Aufbewahrungsort");
 
             foreach (var c in items)
             {
@@ -144,6 +146,8 @@ namespace TodoApi.Controllers
                     Esc(tax?.Rank == "Stamm"   ? tax.Name : null),
                     Esc(c.Collection?.Name),
                     Esc(c.FindingLocation?.Name),
+                    c.FindingLocation?.Latitude?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    c.FindingLocation?.Longitude?.ToString(CultureInfo.InvariantCulture) ?? "",
                     Esc(c.Description),
                     Esc(c.StorageInfo)
                 ));
@@ -218,9 +222,17 @@ namespace TodoApi.Controllers
             var collCache = (await _context.Collections.ToListAsync())
                 .GroupBy(c => c.Name.ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First());
-            var locCache = (await _context.GeoLocations.ToListAsync())
-                .GroupBy(g => g.Name.ToLowerInvariant())
-                .ToDictionary(g => g.Key, g => g.First());
+            // Fundort-Cache: hat ein Fundort Koordinaten, wird nach Name+Koordinaten dedupliziert
+            // (Präfix "c|"), sonst nach reinem Namen (Präfix "n|") — so kollidieren gleichnamige
+            // Fundorte an unterschiedlichen Positionen nicht miteinander.
+            static string LocKey(string name, decimal? lat, decimal? lng) =>
+                lat.HasValue && lng.HasValue
+                    ? $"c|{name}|{lat.Value}|{lng.Value}".ToLowerInvariant()
+                    : $"n|{name}".ToLowerInvariant();
+
+            var locCache = new Dictionary<string, GeoLocation>();
+            foreach (var g in await _context.GeoLocations.ToListAsync())
+                locCache.TryAdd(LocKey(g.Name, g.Latitude, g.Longitude), g);
 
             var errors = new List<string>();
             int imported = 0;
@@ -290,15 +302,28 @@ namespace TodoApi.Controllers
                     }
                 }
 
-                // Fundort: find-or-create nach Name (CSV enthält keine Koordinaten)
+                // Fundort: find-or-create. Sind gültige Koordinaten in der CSV, wird der Fundort inkl.
+                // Position angelegt — nur dann erscheint der importierte Eintrag später auf der Karte.
+                // Ohne Koordinaten bleibt es beim reinen Namens-Fundort (nicht auf der Karte sichtbar).
                 GeoLocation? location = null;
                 var locName = Get(row, "Fundort");
-                if (locName != null)
+
+                var lat = ParseDecimal(Get(row, "Breitengrad"), "Breitengrad");
+                var lng = ParseDecimal(Get(row, "Laengengrad"), "Laengengrad");
+                if (lat.HasValue && (lat < -90 || lat > 90))
+                { errors.Add($"Zeile {lineNo}: Breitengrad '{lat}' außerhalb -90..90, Position ignoriert."); lat = null; }
+                if (lng.HasValue && (lng < -180 || lng > 180))
+                { errors.Add($"Zeile {lineNo}: Laengengrad '{lng}' außerhalb -180..180, Position ignoriert."); lng = null; }
+                // Koordinaten nur verwenden, wenn BEIDE vorhanden sind.
+                if (!(lat.HasValue && lng.HasValue)) { lat = null; lng = null; }
+
+                if (locName != null || (lat.HasValue && lng.HasValue))
                 {
-                    var key = locName.ToLowerInvariant();
+                    var effName = locName ?? "Unbekannter Fundort";
+                    var key = LocKey(effName, lat, lng);
                     if (!locCache.TryGetValue(key, out location))
                     {
-                        location = new GeoLocation { Name = locName };
+                        location = new GeoLocation { Name = effName, Latitude = lat, Longitude = lng };
                         _context.GeoLocations.Add(location);
                         locCache[key] = location;
                     }
