@@ -196,7 +196,11 @@ namespace TodoApi.Controllers
             using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
                 content = await reader.ReadToEndAsync();
 
-            var rows = ParseCsv(content);
+            // Trennzeichen automatisch erkennen: Deutsches Excel exportiert CSV mit Semikolon ';'
+            // statt Komma. Anhand der Kopfzeile (erste nicht-leere Zeile) wird das häufigere
+            // Trennzeichen gewählt, damit sowohl ','- als auch ';'-getrennte Dateien importierbar sind.
+            var delimiter = DetectDelimiter(content);
+            var rows = ParseCsv(content, delimiter);
             if (rows.Count == 0) return BadRequest("Datei ist leer.");
 
             var header = rows[0];
@@ -242,6 +246,17 @@ namespace TodoApi.Controllers
                 var row = rows[r];
                 var lineNo = r + 1; // 1-basiert, +1 wegen Header
                 if (row.Length == 1 && string.IsNullOrWhiteSpace(row[0])) continue; // leere Zeile
+
+                // Reparatur für Dateien, bei denen ein Tabellenprogramm (z.B. Excel) die komplette
+                // Zeile fälschlich in EIN einziges, in Anführungszeichen gesetztes Feld gepackt hat
+                // (typisch beim Öffnen/Speichern einer Komma-CSV in deutscher Locale). Enthält das
+                // Einzelfeld noch das Trennzeichen, obwohl der Header mehrere Spalten hat, wird es
+                // erneut als CSV-Datensatz zerlegt, damit die Spalten wieder korrekt zugeordnet werden.
+                if (row.Length == 1 && header.Length > 1 && row[0].Contains(delimiter))
+                {
+                    var reparsed = ParseCsv(row[0], delimiter);
+                    if (reparsed.Count > 0) row = reparsed[0];
+                }
 
                 var name = Get(row, "Name");
                 if (string.IsNullOrWhiteSpace(name))
@@ -356,10 +371,23 @@ namespace TodoApi.Controllers
             return Ok(new { imported, skipped = errors.Count, errors });
         }
 
+        // Ermittelt das CSV-Trennzeichen anhand der ersten nicht-leeren Zeile (Kopfzeile):
+        // Überwiegt dort das Semikolon (typisch für Exporte aus deutschem Excel), wird ';'
+        // verwendet, sonst das Standard-Komma ','.
+        private static char DetectDelimiter(string content)
+        {
+            var firstLine = content
+                .Split('\n')
+                .FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "";
+            var commas = firstLine.Count(ch => ch == ',');
+            var semicolons = firstLine.Count(ch => ch == ';');
+            return semicolons > commas ? ';' : ',';
+        }
+
         // Zerlegt CSV-Text (RFC 4180) in Zeilen/Felder: erkennt in Anführungszeichen gesetzte Felder
-        // mit eingebetteten Kommas, Zeilenumbrüchen und verdoppelten Anführungszeichen (Gegenstück
-        // zur Esc-Funktion in ExportCsv oben).
-        private static List<string[]> ParseCsv(string content)
+        // mit eingebetteten Trennzeichen, Zeilenumbrüchen und verdoppelten Anführungszeichen (Gegenstück
+        // zur Esc-Funktion in ExportCsv oben). Das Trennzeichen ist parametrierbar (Komma oder Semikolon).
+        private static List<string[]> ParseCsv(string content, char delimiter = ',')
         {
             var rows = new List<string[]>();
             var fields = new List<string>();
@@ -389,14 +417,17 @@ namespace TodoApi.Controllers
                     continue;
                 }
 
+                if (ch == delimiter)
+                {
+                    EndField();
+                    i++;
+                    continue;
+                }
+
                 switch (ch)
                 {
                     case '"':
                         inQuotes = true;
-                        i++;
-                        break;
-                    case ',':
-                        EndField();
                         i++;
                         break;
                     case '\r':
