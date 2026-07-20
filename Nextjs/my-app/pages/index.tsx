@@ -28,15 +28,35 @@ type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
   findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 };
-type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
+// Nur noch für die visuellen Zustände des StatusPill (Farbgebung) genutzt.
+type Loan = { status: "aktiv" | "überfällig" | "zurück" };
 
-// Statische Platzhalterdaten für die "Aktive Leihen"-Kachel (noch nicht an
-// echte Backend-Daten angebunden, im Gegensatz zu notifLoans weiter unten).
-const MOCK_LOANS: Loan[] = [
-  { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",  bis: "2026-06-01", status: "aktiv"     },
-  { id: "LEI-002", objekt: "Carabus violaceus",  an: "Prof. Weber", bis: "2026-04-30", status: "überfällig"},
-  { id: "LEI-003", objekt: "Lacerta agilis",     an: "M. Schmidt",  bis: "2026-07-15", status: "aktiv"     },
-];
+// Vom Backend (GET /api/loan) gelieferte Leihe des eingeloggten Nutzers – sowohl
+// als Verleiher als auch als Entleiher. Statuswerte: "angefragt" | "offen" |
+// "abgelehnt" | "zurückgegeben"; "offen" entspricht einer aktiven Leihe.
+type LoanDto = {
+  id: number;
+  objectName: string | null;
+  status: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  isOverdue: boolean;
+  lenderId: number | null;
+  lenderName: string | null;
+  lenderFirstName: string | null;
+  lenderLastName: string | null;
+  borrowerId: number | null;
+  borrowerName: string | null;
+  borrowerFirstName: string | null;
+  borrowerLastName: string | null;
+};
+
+// Baut einen Anzeigenamen: "Vorname Nachname" falls vorhanden, sonst der
+// Benutzername, sonst ein neutraler Platzhalter.
+const personName = (first: string | null, last: string | null, username: string | null) => {
+  const full = [first, last].filter(Boolean).join(" ").trim();
+  return full || username || "Unbekannt";
+};
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
@@ -81,7 +101,7 @@ export default function HomePage() {
   const [pendingLoanModeration, setPendingLoanModeration] = useState(0);
   const [userRole, setUserRole] = useState("Nutzer");
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [notifLoans, setNotifLoans] = useState<{ id: number; objectName: string | null; endDate: string | null; status: string | null; isOverdue: boolean; lenderId: number | null; borrowerId: number | null }[]>([]);
+  const [notifLoans, setNotifLoans] = useState<LoanDto[]>([]);
   const [rejectedSubs, setRejectedSubs] = useState<{ id: number; art: string; moderatorNote: string | null }[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(() => {
     try {
@@ -234,6 +254,9 @@ export default function HomePage() {
 
   const pending = specimens.filter((s) => s.status === "ausstehend").length;
   const overdue = notifLoans.filter((l) => l.isOverdue).length;
+  // Aktive Leihen = offene Leihen des eingeloggten Nutzers (als Ver- oder Entleiher);
+  // /api/loan liefert bereits nur die eigenen Leihen zurück.
+  const activeLoans = notifLoans.filter((l) => l.status === "offen");
   const pendingLoanRequests = notifLoans.filter((l) => l.status === "angefragt" && l.lenderId === currentUserId).length;
   const rejectedLoans = notifLoans.filter((l) =>
     l.status === "abgelehnt" &&
@@ -687,7 +710,7 @@ export default function HomePage() {
                 <StatCard value={specimens.length} label="Objekte gesamt" sub="in allen Sammlungen" accent />
                 <StatCard value={3} label="Sammlungen" sub="aktiv" />
                 <StatCard value={pending} label="Ausstehend" sub="Taxonomie-Freigabe" />
-                <StatCard value={MOCK_LOANS.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
+                <StatCard value={activeLoans.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
                 <StatCard value={12} label="Fundorte" sub="weltweit kartiert" />
               </div>
             </div>
@@ -796,15 +819,37 @@ export default function HomePage() {
                     <Link href="/leihe" className="card-action">Alle ›</Link>
                   </div>
                   <div className="card">
-                    {MOCK_LOANS.map((loan) => (
-                      <div key={loan.id} className="loan-item">
+                    {!isSignedIn ? (
+                      <div className="loan-item">
                         <div className="loan-info">
-                          <div className="loan-name">{loan.objekt}</div>
-                          <div className="loan-meta">an {loan.an} · bis {loan.bis}</div>
+                          <div className="loan-meta">Melde dich an, um deine Leihen zu sehen.</div>
                         </div>
-                        <StatusPill status={loan.status} />
                       </div>
-                    ))}
+                    ) : activeLoans.length === 0 ? (
+                      <div className="loan-item">
+                        <div className="loan-info">
+                          <div className="loan-meta">Keine aktiven Leihen.</div>
+                        </div>
+                      </div>
+                    ) : (
+                      activeLoans.map((loan) => {
+                        // Ist der eingeloggte Nutzer der Verleiher, zeigen wir den Entleiher
+                        // ("an …"), ist er selbst der Entleiher, den Verleiher ("von …").
+                        const isLender = loan.lenderId === currentUserId;
+                        const partner = isLender
+                          ? personName(loan.borrowerFirstName, loan.borrowerLastName, loan.borrowerName)
+                          : personName(loan.lenderFirstName, loan.lenderLastName, loan.lenderName);
+                        return (
+                          <div key={loan.id} className="loan-item">
+                            <div className="loan-info">
+                              <div className="loan-name">{loan.objectName ?? `Objekt #${loan.id}`}</div>
+                              <div className="loan-meta">{isLender ? "an" : "von"} {partner} · bis {formatDate(loan.endDate ?? undefined)}</div>
+                            </div>
+                            <StatusPill status={loan.isOverdue ? "überfällig" : "aktiv"} />
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
