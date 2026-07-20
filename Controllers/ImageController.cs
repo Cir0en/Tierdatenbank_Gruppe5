@@ -235,20 +235,13 @@ namespace TodoApi.Controllers
                 .FirstOrDefaultAsync(u => u.ClerkId == clerkId);
         }
 
-        // Bearbeitungsrecht für ein Fundobjekt: Eigentümer der zugehörigen Sammlung oder
-        // Admin/Moderator. Objekte ohne Sammlung (CollectionId == null) haben keinen ermittelbaren
-        // Eigentümer und dürfen daher nur von Admin/Moderator bearbeitet werden.
+        // Bearbeitungsrecht für ein Fundobjekt (Foto hochladen/ersetzen/löschen ist Teil des Bearbeitens):
+        // nur der Eigentümer der zugehörigen Sammlung oder ein Admin. Moderatoren dürfen fremde Sammlungen
+        // ausdrücklich NICHT bearbeiten. Objekte ohne Sammlung sind nur für Admins bearbeitbar.
         private static bool CanModifyItem(User user, CollectItem item)
         {
-            return CanModerateCollections(user)
-                || (item.Collection != null && item.Collection.UserId == user.Id);
-        }
-
-        // Moderationsrechte gelten für die Rollen Admin und Moderator
-        private static bool CanModerateCollections(User user)
-        {
             return user.Role == "Admin"
-                || user.Role == "Moderator";
+                || (item.Collection != null && item.Collection.UserId == user.Id);
         }
     }
 }

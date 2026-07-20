@@ -36,6 +36,9 @@ namespace TodoApi.Controllers
             var currentUser = await GetCurrentUserAsync();
 
             var canModerate = currentUser != null && CanModerateCollections(currentUser);
+            // Bearbeiten (Tiere hinzufügen/ändern in dieser Sammlung) dürfen nur der Eigentümer oder ein
+            // Admin — Moderatoren ausdrücklich NICHT in fremden Sammlungen (nur ihre eigenen).
+            var isAdmin = currentUser != null && currentUser.Role == "Admin";
 
             var collections = await _context.Collections
                 .Where(c =>
@@ -52,7 +55,7 @@ namespace TodoApi.Controllers
                     OwnerUsername = c.User != null ? c.User.Username : null,
 
                     IsOwner = currentUser != null && c.UserId == currentUser.Id,
-                    CanEdit = currentUser != null && (canModerate || c.UserId == currentUser.Id),
+                    CanEdit = currentUser != null && (isAdmin || c.UserId == currentUser.Id),
                     CanDelete = currentUser != null && (canModerate || c.UserId == currentUser.Id)
                 })
                 .ToListAsync();
@@ -71,6 +74,9 @@ namespace TodoApi.Controllers
         {
             var currentUser = await GetCurrentUserAsync();
             var canModerate = currentUser != null && CanModerateCollections(currentUser);
+            // Bearbeiten (Tiere hinzufügen/ändern) nur für Eigentümer oder Admin — Moderatoren
+            // dürfen fremde Sammlungen ausdrücklich NICHT bearbeiten (nur ihre eigenen).
+            var isAdmin = currentUser != null && currentUser.Role == "Admin";
 
             var collection = await _context.Collections
                 .Where(c => c.Id == id)
@@ -87,7 +93,7 @@ namespace TodoApi.Controllers
                     OwnerUsername = c.User != null ? c.User.Username : null,
 
                     IsOwner = currentUser != null && c.UserId == currentUser.Id,
-                    CanEdit = currentUser != null && (canModerate || c.UserId == currentUser.Id),
+                    CanEdit = currentUser != null && (isAdmin || c.UserId == currentUser.Id),
                     CanDelete = currentUser != null && (canModerate || c.UserId == currentUser.Id),
 
                     Items = c.CollectItems.Select(item => new CollectionItemDto

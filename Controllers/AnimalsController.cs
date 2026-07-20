@@ -37,7 +37,7 @@ namespace TodoApi.Controllers
         }
 
         // GET /api/animals/{id} — Detailansicht eines Fundobjekts inkl. Taxonomie, Sammlung und Fundort;
-        // enthält zusätzlich canEdit/canDelete für den anfragenden Nutzer (siehe CanModifyItem), damit
+        // enthält zusätzlich canEdit/canDelete für den anfragenden Nutzer (siehe CanEditItem/CanDeleteItem), damit
         // das Frontend den Bearbeiten-/Löschen-Button nur bei Berechtigung anzeigt.
         [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetAnimal(int id)
@@ -51,7 +51,10 @@ namespace TodoApi.Controllers
             if (obj == null) return NotFound();
 
             var currentUser = await GetCurrentUserAsync();
-            var canModify = currentUser != null && CanModifyItem(currentUser, obj);
+            // Bearbeiten: nur Eigentümer der Sammlung oder Admin. Löschen: zusätzlich Moderator/Ersteller
+            // (Moderationsfunktion) — deshalb getrennte Flags.
+            var canEdit = currentUser != null && CanEditItem(currentUser, obj);
+            var canDelete = currentUser != null && CanDeleteItem(currentUser, obj);
 
             return Ok(new
             {
@@ -73,8 +76,8 @@ namespace TodoApi.Controllers
                 Taxonomy = obj.Taxonomy == null ? null : new { obj.Taxonomy.Id, obj.Taxonomy.Name, obj.Taxonomy.Rank },
                 Collection = obj.Collection == null ? null : new { obj.Collection.Id, obj.Collection.Name },
                 FindingLocation = obj.FindingLocation == null ? null : new { obj.FindingLocation.Id, obj.FindingLocation.Name, obj.FindingLocation.Latitude, obj.FindingLocation.Longitude },
-                CanEdit = canModify,
-                CanDelete = canModify,
+                CanEdit = canEdit,
+                CanDelete = canDelete,
             });
         }
 
@@ -116,7 +119,9 @@ namespace TodoApi.Controllers
                     ? $"\"{v.Replace("\"", "\"\"")}\"" : v;
 
             var sb = new StringBuilder();
-            sb.AppendLine("ID,Name,Status,Geschlecht,Altersklasse,Funddatum,Koerpermasse_g,Koerperlaenge_mm,Art,Gattung,Familie,Ordnung,Klasse,Stamm,Sammlung,Fundort,Beschreibung,Aufbewahrungsort");
+            // Breitengrad/Laengengrad werden mitexportiert, damit ein späterer Import den Fundort MIT
+            // Koordinaten wiederherstellen kann und die Einträge dann auf der Karte erscheinen.
+            sb.AppendLine("ID,Name,Status,Geschlecht,Altersklasse,Funddatum,Koerpermasse_g,Koerperlaenge_mm,Art,Gattung,Familie,Ordnung,Klasse,Stamm,Sammlung,Fundort,Breitengrad,Laengengrad,Beschreibung,Aufbewahrungsort");
 
             foreach (var c in items)
             {
@@ -141,6 +146,8 @@ namespace TodoApi.Controllers
                     Esc(tax?.Rank == "Stamm"   ? tax.Name : null),
                     Esc(c.Collection?.Name),
                     Esc(c.FindingLocation?.Name),
+                    c.FindingLocation?.Latitude?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    c.FindingLocation?.Longitude?.ToString(CultureInfo.InvariantCulture) ?? "",
                     Esc(c.Description),
                     Esc(c.StorageInfo)
                 ));
@@ -189,7 +196,11 @@ namespace TodoApi.Controllers
             using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
                 content = await reader.ReadToEndAsync();
 
-            var rows = ParseCsv(content);
+            // Trennzeichen automatisch erkennen: Deutsches Excel exportiert CSV mit Semikolon ';'
+            // statt Komma. Anhand der Kopfzeile (erste nicht-leere Zeile) wird das häufigere
+            // Trennzeichen gewählt, damit sowohl ','- als auch ';'-getrennte Dateien importierbar sind.
+            var delimiter = DetectDelimiter(content);
+            var rows = ParseCsv(content, delimiter);
             if (rows.Count == 0) return BadRequest("Datei ist leer.");
 
             var header = rows[0];
@@ -215,9 +226,17 @@ namespace TodoApi.Controllers
             var collCache = (await _context.Collections.ToListAsync())
                 .GroupBy(c => c.Name.ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First());
-            var locCache = (await _context.GeoLocations.ToListAsync())
-                .GroupBy(g => g.Name.ToLowerInvariant())
-                .ToDictionary(g => g.Key, g => g.First());
+            // Fundort-Cache: hat ein Fundort Koordinaten, wird nach Name+Koordinaten dedupliziert
+            // (Präfix "c|"), sonst nach reinem Namen (Präfix "n|") — so kollidieren gleichnamige
+            // Fundorte an unterschiedlichen Positionen nicht miteinander.
+            static string LocKey(string name, decimal? lat, decimal? lng) =>
+                lat.HasValue && lng.HasValue
+                    ? $"c|{name}|{lat.Value}|{lng.Value}".ToLowerInvariant()
+                    : $"n|{name}".ToLowerInvariant();
+
+            var locCache = new Dictionary<string, GeoLocation>();
+            foreach (var g in await _context.GeoLocations.ToListAsync())
+                locCache.TryAdd(LocKey(g.Name, g.Latitude, g.Longitude), g);
 
             var errors = new List<string>();
             int imported = 0;
@@ -227,6 +246,17 @@ namespace TodoApi.Controllers
                 var row = rows[r];
                 var lineNo = r + 1; // 1-basiert, +1 wegen Header
                 if (row.Length == 1 && string.IsNullOrWhiteSpace(row[0])) continue; // leere Zeile
+
+                // Reparatur für Dateien, bei denen ein Tabellenprogramm (z.B. Excel) die komplette
+                // Zeile fälschlich in EIN einziges, in Anführungszeichen gesetztes Feld gepackt hat
+                // (typisch beim Öffnen/Speichern einer Komma-CSV in deutscher Locale). Enthält das
+                // Einzelfeld noch das Trennzeichen, obwohl der Header mehrere Spalten hat, wird es
+                // erneut als CSV-Datensatz zerlegt, damit die Spalten wieder korrekt zugeordnet werden.
+                if (row.Length == 1 && header.Length > 1 && row[0].Contains(delimiter))
+                {
+                    var reparsed = ParseCsv(row[0], delimiter);
+                    if (reparsed.Count > 0) row = reparsed[0];
+                }
 
                 var name = Get(row, "Name");
                 if (string.IsNullOrWhiteSpace(name))
@@ -287,15 +317,28 @@ namespace TodoApi.Controllers
                     }
                 }
 
-                // Fundort: find-or-create nach Name (CSV enthält keine Koordinaten)
+                // Fundort: find-or-create. Sind gültige Koordinaten in der CSV, wird der Fundort inkl.
+                // Position angelegt — nur dann erscheint der importierte Eintrag später auf der Karte.
+                // Ohne Koordinaten bleibt es beim reinen Namens-Fundort (nicht auf der Karte sichtbar).
                 GeoLocation? location = null;
                 var locName = Get(row, "Fundort");
-                if (locName != null)
+
+                var lat = ParseDecimal(Get(row, "Breitengrad"), "Breitengrad");
+                var lng = ParseDecimal(Get(row, "Laengengrad"), "Laengengrad");
+                if (lat.HasValue && (lat < -90 || lat > 90))
+                { errors.Add($"Zeile {lineNo}: Breitengrad '{lat}' außerhalb -90..90, Position ignoriert."); lat = null; }
+                if (lng.HasValue && (lng < -180 || lng > 180))
+                { errors.Add($"Zeile {lineNo}: Laengengrad '{lng}' außerhalb -180..180, Position ignoriert."); lng = null; }
+                // Koordinaten nur verwenden, wenn BEIDE vorhanden sind.
+                if (!(lat.HasValue && lng.HasValue)) { lat = null; lng = null; }
+
+                if (locName != null || (lat.HasValue && lng.HasValue))
                 {
-                    var key = locName.ToLowerInvariant();
+                    var effName = locName ?? "Unbekannter Fundort";
+                    var key = LocKey(effName, lat, lng);
                     if (!locCache.TryGetValue(key, out location))
                     {
-                        location = new GeoLocation { Name = locName };
+                        location = new GeoLocation { Name = effName, Latitude = lat, Longitude = lng };
                         _context.GeoLocations.Add(location);
                         locCache[key] = location;
                     }
@@ -328,10 +371,23 @@ namespace TodoApi.Controllers
             return Ok(new { imported, skipped = errors.Count, errors });
         }
 
+        // Ermittelt das CSV-Trennzeichen anhand der ersten nicht-leeren Zeile (Kopfzeile):
+        // Überwiegt dort das Semikolon (typisch für Exporte aus deutschem Excel), wird ';'
+        // verwendet, sonst das Standard-Komma ','.
+        private static char DetectDelimiter(string content)
+        {
+            var firstLine = content
+                .Split('\n')
+                .FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "";
+            var commas = firstLine.Count(ch => ch == ',');
+            var semicolons = firstLine.Count(ch => ch == ';');
+            return semicolons > commas ? ';' : ',';
+        }
+
         // Zerlegt CSV-Text (RFC 4180) in Zeilen/Felder: erkennt in Anführungszeichen gesetzte Felder
-        // mit eingebetteten Kommas, Zeilenumbrüchen und verdoppelten Anführungszeichen (Gegenstück
-        // zur Esc-Funktion in ExportCsv oben).
-        private static List<string[]> ParseCsv(string content)
+        // mit eingebetteten Trennzeichen, Zeilenumbrüchen und verdoppelten Anführungszeichen (Gegenstück
+        // zur Esc-Funktion in ExportCsv oben). Das Trennzeichen ist parametrierbar (Komma oder Semikolon).
+        private static List<string[]> ParseCsv(string content, char delimiter = ',')
         {
             var rows = new List<string[]>();
             var fields = new List<string>();
@@ -361,14 +417,17 @@ namespace TodoApi.Controllers
                     continue;
                 }
 
+                if (ch == delimiter)
+                {
+                    EndField();
+                    i++;
+                    continue;
+                }
+
                 switch (ch)
                 {
                     case '"':
                         inQuotes = true;
-                        i++;
-                        break;
-                    case ',':
-                        EndField();
                         i++;
                         break;
                     case '\r':
@@ -401,21 +460,34 @@ namespace TodoApi.Controllers
         public async Task<ActionResult<CollectItem>> CreateAnimal(CreateAnimalDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
 
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
                 return BadRequest("Name fehlt");
             }
 
-            if (dto.CollectionId.HasValue)
+            // Sammlung ist Pflicht und der Nutzer darf Tiere nur in seine EIGENE Sammlung anlegen
+            // (Admin ausgenommen). Moderatoren dürfen ausdrücklich NICHT in fremden Sammlungen anlegen.
+            if (!dto.CollectionId.HasValue)
             {
-                var collectionExists = await _context.Collections
-                    .AnyAsync(c => c.Id == dto.CollectionId.Value);
+                return BadRequest("Sammlung ist erforderlich");
+            }
 
-                if (!collectionExists)
-                {
-                    return BadRequest("Collection existiert nicht");
-                }
+            var collection = await _context.Collections
+                .FirstOrDefaultAsync(c => c.Id == dto.CollectionId.Value);
+
+            if (collection == null)
+            {
+                return BadRequest("Collection existiert nicht");
+            }
+
+            if (!CanManageCollection(currentUser, collection))
+            {
+                return Forbid();
             }
 
             if (dto.TaxonomyId.HasValue)
@@ -470,10 +542,26 @@ namespace TodoApi.Controllers
             return CreatedAtAction(nameof(GetAnimal), new { id = item.Id }, item);
         }
 
-        // Bearbeitungs-/Löschrecht für ein Fundobjekt: Admin/Moderator oder der Nutzer, der den
-        // Eintrag angelegt hat (CreatedByUserId). Gemeinsam genutzt von GetAnimal (canEdit/canDelete-
-        // Flags), UpdateAnimal und DeleteAnimal, damit alle drei Aktionen dieselbe Regel anwenden.
-        private static bool CanModifyItem(User user, CollectItem item)
+        // Verwaltungsrecht für eine Sammlung (Tiere anlegen/bearbeiten): nur der Eigentümer der
+        // Sammlung oder ein Admin. Moderatoren dürfen fremde Sammlungen ausdrücklich NICHT verwalten
+        // (nur ihre eigenen). Grundlage für das Anlegen von Tieren (CreateAnimal/CreateMapAnimal).
+        private static bool CanManageCollection(User user, Collection collection)
+        {
+            return user.Role == "Admin" || collection.UserId == user.Id;
+        }
+
+        // Bearbeitungsrecht für ein bestehendes Fundobjekt: nur der Eigentümer der zugehörigen Sammlung
+        // oder ein Admin (Moderatoren dürfen fremde Sammlungen nicht bearbeiten). Setzt voraus, dass
+        // item.Collection geladen ist. Objekte ohne Sammlung sind nur für Admins bearbeitbar.
+        private static bool CanEditItem(User user, CollectItem item)
+        {
+            return user.Role == "Admin" || (item.Collection != null && item.Collection.UserId == user.Id);
+        }
+
+        // Löschrecht für ein Fundobjekt: Admin/Moderator (Moderationsfunktion) oder der Nutzer, der den
+        // Eintrag angelegt hat (CreatedByUserId). Bewusst getrennt vom Bearbeitungsrecht — das Löschen
+        // als Moderationsmaßnahme bleibt Moderatoren erhalten, das Bearbeiten fremder Sammlungen nicht.
+        private static bool CanDeleteItem(User user, CollectItem item)
         {
             var isModerator = user.Role == "Admin" || user.Role == "Moderator";
             var isCreator = item.CreatedByUserId.HasValue && item.CreatedByUserId == user.Id;
@@ -507,6 +595,10 @@ namespace TodoApi.Controllers
         public async Task<ActionResult<CollectItem>> CreateMapAnimal(CreateMapAnimalDto dto)
         {
             var currentUser = await GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized();
+            }
 
             if (string.IsNullOrWhiteSpace(dto.Name))
             {
@@ -538,12 +630,9 @@ namespace TodoApi.Controllers
                 return BadRequest("Collection existiert nicht");
             }
 
-            // Ist der Nutzer identifizierbar, darf er nur in seine eigenen Sammlungen einordnen
-            // (Admin/Moderator ausgenommen). Anonyme Anfragen bleiben wie bisher zugelassen.
-            if (currentUser != null
-                && collection.UserId != currentUser.Id
-                && currentUser.Role != "Admin"
-                && currentUser.Role != "Moderator")
+            // Der Nutzer darf Tiere nur in seine EIGENE Sammlung einordnen (Admin ausgenommen).
+            // Moderatoren dürfen ausdrücklich NICHT in fremden Sammlungen anlegen.
+            if (!CanManageCollection(currentUser, collection))
             {
                 return Forbid();
             }
@@ -586,8 +675,8 @@ namespace TodoApi.Controllers
         }
 
         // PUT /api/animals/{id} — bearbeitet ein bestehendes Fundobjekt (Stammdaten + Taxonomie +
-        // optionale Koordinaten). Dieselbe Berechtigung wie beim Löschen (siehe CanModifyItem):
-        // nur Admin/Moderator oder der Nutzer, der den Eintrag angelegt hat, dürfen bearbeiten.
+        // optionale Koordinaten). Bearbeiten darf nur der Eigentümer der zugehörigen Sammlung oder ein
+        // Admin (siehe CanEditItem) — Moderatoren dürfen fremde Sammlungen ausdrücklich NICHT bearbeiten.
         // Koordinaten werden wie bei CreateAnimal/CreateMapAnimal über GetOrCreateLocationAsync
         // aufgelöst statt einen evtl. von anderen Objekten geteilten Fundort direkt zu verändern;
         // werden beide Koordinaten weggelassen, verliert das Objekt seinen Fundort.
@@ -601,13 +690,15 @@ namespace TodoApi.Controllers
                 return Unauthorized();
             }
 
-            var item = await _context.CollectItems.FindAsync(id);
+            var item = await _context.CollectItems
+                .Include(i => i.Collection)
+                .FirstOrDefaultAsync(i => i.Id == id);
             if (item == null)
             {
                 return NotFound();
             }
 
-            if (!CanModifyItem(currentUser, item))
+            if (!CanEditItem(currentUser, item))
             {
                 return Forbid();
             }
@@ -680,7 +771,7 @@ namespace TodoApi.Controllers
                 return NotFound();
             }
 
-            if (!CanModifyItem(currentUser, item))
+            if (!CanDeleteItem(currentUser, item))
             {
                 return Forbid();
             }
