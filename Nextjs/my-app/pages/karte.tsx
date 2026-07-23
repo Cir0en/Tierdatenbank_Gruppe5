@@ -10,6 +10,7 @@ import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
 import { useAuth } from '@clerk/nextjs';
+import { useTaxonomyFilter, TaxonomyFilterControl } from '../components/TaxonomyFilter';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 const SELTENHEIT_OPTIONS = ['Häufig','Selten','Sehr selten','Ungefährdet','Wichtig','Geschützt','Stark gefährdet'];
@@ -54,6 +55,8 @@ interface MapItem {
   longitude: number;
   sex: string | null;
   canDelete: boolean;
+  // Verknüpfte Taxonomie (aus /api/geolocations/map-items) — Basis für den Taxonomie-Filter.
+  taxonomyId: number | null;
 }
 
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
@@ -70,7 +73,7 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   locationName: string | null;
   userId: string | null | undefined;
   onClose: () => void;
-  onSaved: (name: string, sex: string, id: number, locationName: string) => void;
+  onSaved: (name: string, sex: string, id: number, locationName: string, taxonomyId: number | null) => void;
 }) {
   const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
@@ -212,7 +215,7 @@ function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       const saved = await res.json();
-      onSaved(displayName.trim(), sex, saved.id, locationNameInput.trim() || fallbackLocationName);
+      onSaved(displayName.trim(), sex, saved.id, locationNameInput.trim() || fallbackLocationName, taxonomyId);
     } catch (err: any) {
       setError(err.message);
       setSaving(false);
@@ -596,13 +599,28 @@ export default function MapPage() {
   const [formLocationName, setFormLocationName] = useState<string | null>(null);
   const [geoResults, setGeoResults] = useState<any[]>([]);
 
+  // Wiederverwendbarer Taxonomie-Filter (geteiltes Modul mit der Heatmap-Ansicht).
+  // Eine per URL (?tax=) übergebene Vorauswahl bleibt so beim Wechsel Heatmap→Karte erhalten.
+  const taxParam = router.query.tax;
+  const initialTax = typeof taxParam === 'string' && taxParam !== '' && Number.isFinite(Number(taxParam))
+    ? Number(taxParam) : null;
+  const taxFilter = useTaxonomyFilter(items, initialTax);
+  // Anzahl aktuell (nach Filter) sichtbarer Marker — informativ im Dropdown.
+  const visibleCount = useMemo(
+    () => items.filter(it => taxFilter.matches(it.taxonomyId)).length,
+    [items, taxFilter.matches]
+  );
+
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
     return items
+      // Die Suche berücksichtigt denselben Taxonomie-Filter wie die Karte, damit
+      // Treffer und sichtbare Marker konsistent bleiben.
+      .filter(it => taxFilter.matches(it.taxonomyId))
       .filter(it => (it.itemName ?? '').toLowerCase().includes(q) || it.locationName.toLowerCase().includes(q))
       .slice(0, 8);
-  }, [search, items]);
+  }, [search, items, taxFilter.matches]);
 
   useEffect(() => {
     const q = search.trim();
@@ -661,7 +679,7 @@ export default function MapPage() {
   // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
   const addMarkerRef = useRef < ((name: string,
     sex: string, id: number,
-    lng: number, lat: number, locationName: string) => void) | null>(null);
+    lng: number, lat: number, locationName: string, taxonomyId: number | null) => void) | null>(null);
 
   // Initialisiert die MapTiler-Karte genau einmal (sobald der Container im DOM
   // ist und die Next.js-Route/-Query bereit ist) und registriert alle
@@ -755,10 +773,10 @@ export default function MapPage() {
     openItemPopupRef.current = openItemPopup;
 
     // Marker nach dem Speichern setzen (via Ref aus React erreichbar)
-    addMarkerRef.current = (name, sex, id, lng, lat, locationName) => {
+    addMarkerRef.current = (name, sex, id, lng, lat, locationName, taxonomyId) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
       // Selbst angelegte Objekte darf man auch gleich wieder löschen.
-      const newItem: MapItem = { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true };
+      const newItem: MapItem = { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true, taxonomyId: taxonomyId ?? null };
       // stopPropagation verhindert, dass der Klick zusätzlich den Karten-eigenen
       // click-Handler auslöst (der sonst das "Tier erfassen"-Formular als
       // Vollbild-Overlay über dem Popup öffnen würde).
@@ -837,14 +855,30 @@ export default function MapPage() {
     };
   }, [router.isReady]);
 
+  // Blendet Marker beim Wechsel des Taxonomie-Filters (oder bei neuen/gelöschten
+  // Items) ein bzw. aus, ohne die Marker neu erzeugen zu müssen: passende Marker
+  // werden zur Karte hinzugefügt, nicht passende entfernt.
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map) return;
+    for (const it of items) {
+      const marker = markersRef.current.get(it.itemId);
+      if (!marker) continue;
+      if (taxFilter.matches(it.taxonomyId)) marker.addTo(map);
+      else marker.remove();
+    }
+  }, [items, taxFilter.matches]);
+
   // Wechselt zur Heatmap-Ansicht und gibt dabei das aktuelle Kartenzentrum/-zoom
   // als Query-Parameter mit, damit die Heatmap an derselben Stelle startet statt
   // wieder beim Standard-Ausschnitt.
   const goToHeatmap = () => {
+    // Aktiven Taxonomie-Filter mitnehmen, damit er auf der Heatmap erhalten bleibt.
+    const tax = taxFilter.selectedId != null ? `&tax=${taxFilter.selectedId}` : '';
     const map = mapInstance.current;
-    if (!map) { router.push('/heatmap'); return; }
+    if (!map) { router.push(`/heatmap${tax ? `?${tax.slice(1)}` : ''}`); return; }
     const c = map.getCenter();
-    router.push(`/heatmap?lng=${c.lng}&lat=${c.lat}&zoom=${map.getZoom()}`);
+    router.push(`/heatmap?lng=${c.lng}&lat=${c.lat}&zoom=${map.getZoom()}${tax}`);
   };
 
   return (
@@ -927,6 +961,16 @@ export default function MapPage() {
           )}
         </div>
 
+        {/* Taxonomie-Filter (geteiltes Modul, auch in der Heatmap genutzt) */}
+        <div className="map-taxfilter">
+          <TaxonomyFilterControl
+            options={taxFilter.options}
+            selectedId={taxFilter.selectedId}
+            onChange={taxFilter.setSelectedId}
+            count={visibleCount}
+          />
+        </div>
+
         <button className="view-switch-btn" onClick={goToHeatmap} title="Zur Heatmap wechseln">
           🔥 Heatmap
         </button>
@@ -938,8 +982,8 @@ export default function MapPage() {
             locationName={formLocationName}
             userId={userId}
             onClose={() => setFormOpen(false)}
-            onSaved={(name, sex, id, locationName) => {
-              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat, locationName);
+            onSaved={(name, sex, id, locationName, taxonomyId) => {
+              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat, locationName, taxonomyId);
               setFormOpen(false);
             }}
           />
@@ -958,6 +1002,11 @@ export default function MapPage() {
             transition: background .15s, transform .15s;
           }
           .view-switch-btn:hover { background: #fff; transform: translateY(-1px); }
+
+          /* ── Taxonomie-Filter (unter der Suchleiste) ── */
+          .map-taxfilter {
+            position: absolute; top: 60px; left: 12px; z-index: 500;
+          }
 
           /* ── Karten-Suche ── */
           .map-search-wrap {
