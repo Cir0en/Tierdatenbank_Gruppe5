@@ -1004,9 +1004,12 @@ export default function MapPage() {
           }
           .view-switch-btn:hover { background: #fff; transform: translateY(-1px); }
 
-          /* ── Taxonomie-Filter (unter der Suchleiste) ── */
+          /* ── Taxonomie-Filter (rechts neben der Suchleiste, damit er die
+                Suche und deren Trefferliste nicht verdeckt) ── */
           .map-taxfilter {
-            position: absolute; top: 60px; left: 12px; z-index: 500;
+            position: absolute; top: 12px; z-index: 500;
+            /* Suche: left 12px + Inhalt min(300px, 100vw-24px) + 30px Padding/Rahmen + 12px Abstand */
+            left: calc(54px + min(300px, calc(100vw - 24px)));
           }
 
           /* ── Karten-Suche ── */
