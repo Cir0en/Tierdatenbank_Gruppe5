@@ -174,7 +174,6 @@ namespace TodoApi.Controllers
 
         // Spaltennamen der Rangstufen in der CSV, in der Reihenfolge, in der nach der ersten
         // befüllten Spalte gesucht wird (entspricht den vom Export erzeugten Spalten).
-        private static readonly string[] TaxonomyRankColumns = ["Art", "Gattung", "Familie", "Ordnung", "Klasse", "Stamm"];
 
         // POST /api/animals/import/csv — importiert Fundobjekte aus einer CSV-Datei im gleichen
         // Format wie /export/csv erzeugt (Spalten werden per Header-Name gelesen, Reihenfolge ist
@@ -227,9 +226,9 @@ namespace TodoApi.Controllers
             // (Rank+)Name-Kombinationen enthalten kann (z.B. doppelt angelegte Taxonomien/Sammlungen/
             // Fundorte); ToDictionaryAsync würde dabei mit "duplicate key" abbrechen. Bei Duplikaten
             // wird der erste Treffer wiederverwendet.
-            var taxCache = (await _context.Taxonomies.ToListAsync())
-                .GroupBy(t => $"{t.Rank}|{t.Name}".ToLowerInvariant())
-                .ToDictionary(g => g.Key, g => g.First());
+            // Cache für die Taxonomie-Ketten dieses Imports (Schlüssel: Rang|Name|ParentId),
+            // damit gleiche Ketten (z.B. mehrere Tiere derselben Art) nicht mehrfach aufgebaut werden.
+            var taxChainCache = new Dictionary<string, Taxonomy>();
             var collCache = (await _context.Collections.ToListAsync())
                 .GroupBy(c => c.Name.ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First());
@@ -293,22 +292,14 @@ namespace TodoApi.Controllers
                 var bodyMass = ParseDecimal(Get(row, "Koerpermasse_g"), "Koerpermasse_g");
                 var bodyLength = ParseDecimal(Get(row, "Koerperlaenge_mm"), "Koerperlaenge_mm");
 
-                // Taxonomie: erste befüllte Rang-Spalte (Art/Gattung/...) gewinnt
+                // Taxonomie: die komplette Kette (grob→fein) unterhalb von "Animalia" aufbauen bzw.
+                // wiederverwenden, damit die Art korrekt tief in der Hierarchie hängt statt auf
+                // Wurzelebene neben Animalia. Verlinkt wird der feinste befüllte Rang (i.d.R. die Art).
+                var chainRanks = new[] { "Stamm", "Klasse", "Ordnung", "Familie", "Gattung", "Art" };
+                var chainValues = chainRanks.Select(rk => Get(row, rk)).ToArray();
                 Taxonomy? taxonomy = null;
-                foreach (var rank in TaxonomyRankColumns)
-                {
-                    var taxName = Get(row, rank);
-                    if (taxName == null) continue;
-
-                    var key = $"{rank}|{taxName}".ToLowerInvariant();
-                    if (!taxCache.TryGetValue(key, out taxonomy))
-                    {
-                        taxonomy = new Taxonomy { Name = taxName, Rank = rank, IsApproved = true };
-                        _context.Taxonomies.Add(taxonomy);
-                        taxCache[key] = taxonomy;
-                    }
-                    break;
-                }
+                if (chainValues.Any(v => !string.IsNullOrWhiteSpace(v)))
+                    taxonomy = await GetOrCreateTaxonomyChainForImportAsync(chainRanks, chainValues, taxChainCache);
 
                 // Sammlung: find-or-create nach Name
                 Collection? collection = null;
@@ -376,6 +367,54 @@ namespace TodoApi.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { imported, skipped = errors.Count, errors });
+        }
+
+        // Baut die vollständige Taxonomie-Kette (grob→fein, z.B. Stamm→Art) unterhalb von "Animalia"
+        // auf bzw. verwendet vorhandene Knoten wieder — analog zu GetOrCreateTaxonomyChainAsync im
+        // TaxonomyController. So hängt eine importierte Art korrekt tief in der Hierarchie statt (wie
+        // bisher) ohne Elternkette auf Wurzelebene neben Animalia. Der Abgleich erfolgt je Ebene über
+        // Name+Rang+ParentId; fehlende Zwischenränge werden übersprungen. Rückgabe: der feinste
+        // befüllte Knoten (i.d.R. die Art) oder null, wenn keine Ränge gesetzt sind.
+        private async Task<Taxonomy?> GetOrCreateTaxonomyChainForImportAsync(
+            string[] ranks, string?[] values, Dictionary<string, Taxonomy> chainCache)
+        {
+            // Wurzel "Animalia" (Reich) finden oder anlegen — alle Tier-Taxonomien hängen darunter.
+            var animalia = await _context.Taxonomies
+                .FirstOrDefaultAsync(t => t.Name == "Animalia" && t.Rank == "Reich");
+            if (animalia == null)
+            {
+                animalia = new Taxonomy { Name = "Animalia", Rank = "Reich", ParentId = null, IsApproved = true };
+                _context.Taxonomies.Add(animalia);
+                await _context.SaveChangesAsync();
+            }
+
+            Taxonomy parent = animalia;
+            Taxonomy? leaf = null;
+
+            for (int i = 0; i < ranks.Length; i++)
+            {
+                var name = values[i]?.Trim();
+                if (string.IsNullOrWhiteSpace(name)) continue; // fehlende Ebene überspringen
+
+                var rank = ranks[i];
+                var cacheKey = $"{rank}|{name}|{parent.Id}".ToLowerInvariant();
+                if (!chainCache.TryGetValue(cacheKey, out var node))
+                {
+                    node = await _context.Taxonomies
+                        .FirstOrDefaultAsync(t => t.Name == name && t.Rank == rank && t.ParentId == parent.Id);
+                    if (node == null)
+                    {
+                        node = new Taxonomy { Name = name, Rank = rank, ParentId = parent.Id, IsApproved = true };
+                        _context.Taxonomies.Add(node);
+                        await _context.SaveChangesAsync(); // Id wird als ParentId der nächsten Ebene benötigt
+                    }
+                    chainCache[cacheKey] = node;
+                }
+                parent = node;
+                leaf = node;
+            }
+
+            return leaf;
         }
 
         // Dekodiert die hochgeladenen CSV-Bytes robust, damit Sonderzeichen (Umlaute, ß, Gedanken-
