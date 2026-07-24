@@ -475,6 +475,7 @@ interface ReverseGeocodeResult {
   isPrecise: boolean;
 }
 
+// Berechnung der Distanz mit der Haversine-Formel
 function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
   const earthRadius = 6371000;
   const toRad = (v: number) => v * Math.PI / 180;

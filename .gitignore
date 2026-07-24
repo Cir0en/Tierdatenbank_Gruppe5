@@ -383,3 +383,8 @@ FodyWeavers.xsd
 /Daten/
 obj/Debug/net10.0/TodoApi.AssemblyInfo.cs
 obj/Debug/net10.0/TodoApi.AssemblyInfoInputs.cache
+
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
