@@ -192,9 +192,16 @@ namespace TodoApi.Controllers
             if (file == null || file.Length == 0)
                 return BadRequest("Keine Datei ausgewählt.");
 
-            string content;
-            using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
-                content = await reader.ReadToEndAsync();
+            // Datei zuerst als Bytes einlesen und dann robust dekodieren: Ohne Encoding-Erkennung
+            // würden Dateien aus deutschem Excel (Windows-1252/ANSI) beim festen UTF-8-Lesen ihre
+            // Umlaute (ä/ö/ü/ß) als Ersatzzeichen "?" verlieren.
+            byte[] bytes;
+            using (var ms = new MemoryStream())
+            {
+                await file.OpenReadStream().CopyToAsync(ms);
+                bytes = ms.ToArray();
+            }
+            var content = DecodeCsvBytes(bytes);
 
             // Trennzeichen automatisch erkennen: Deutsches Excel exportiert CSV mit Semikolon ';'
             // statt Komma. Anhand der Kopfzeile (erste nicht-leere Zeile) wird das häufigere
@@ -369,6 +376,28 @@ namespace TodoApi.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { imported, skipped = errors.Count, errors });
+        }
+
+        // Dekodiert die hochgeladenen CSV-Bytes robust, damit Sonderzeichen (Umlaute, ß, Gedanken-
+        // striche) erhalten bleiben statt zu "?" zu werden:
+        //   1. UTF-8-BOM vorhanden  -> UTF-8 (ohne BOM),
+        //   2. sonst strikt als UTF-8 versuchen (gültige UTF-8-Datei),
+        //   3. schlägt das fehl     -> Windows-1252 (typisch für ANSI-Export aus deutschem Excel).
+        private static string DecodeCsvBytes(byte[] bytes)
+        {
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+
+            try
+            {
+                var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+                return strictUtf8.GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                // Kein gültiges UTF-8 → als Windows-1252 (deutsches Excel/ANSI) interpretieren.
+                return Encoding.GetEncoding(1252).GetString(bytes);
+            }
         }
 
         // Ermittelt das CSV-Trennzeichen anhand der ersten nicht-leeren Zeile (Kopfzeile):
