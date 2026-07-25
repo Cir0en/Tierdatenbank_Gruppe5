@@ -65,7 +65,6 @@
                             <Label Text="{translator:Translate DBQuickCollections}" FontSize="10" FontAttributes="Bold" HorizontalOptions="Center"/>
                         </VerticalStackLayout>
                     </Frame>
-                    <!-- Map Navigation 
                     <Frame CornerRadius="15" WidthRequest="120" HeightRequest="100">
                         <Frame.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding NavigateToMapCommand}" />
@@ -74,7 +73,7 @@
                             <Label Text="🌍" FontSize="24" HorizontalOptions="Center"/>
                             <Label Text="{translator:Translate DBQuickMap}" FontSize="10" FontAttributes="Bold" HorizontalOptions="Center"/>
                         </VerticalStackLayout>
-                    </Frame> -->
+                    </Frame>
                 </HorizontalStackLayout>
 
                 <Label Text="{translator:Translate Notifications}" FontAttributes="Bold" FontSize="18" />

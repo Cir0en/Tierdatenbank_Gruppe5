@@ -1,12 +1,67 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="Tierapp.Map">
+             x:Class="Tierapp.Map"
+             xmlns:maps="clr-namespace:Syncfusion.Maui.Maps;assembly=Syncfusion.Maui.Maps">
 
-        <Grid>
-        <WebView x:Name="MapWebView" 
-                 Source="map.html"
-                 Navigating="OnWebViewNavigating" />
+    <Grid RowDefinitions="Auto, *">
+
+    <SearchBar Grid.Row="0"
+                   Placeholder="Nach Ort filtern..."
+                   Text="{Binding FilterText}"
+                   SearchCommand="{Binding LoadLocationsCommand}"
+                   Margin="10"/>   
+
+    <maps:SfMaps Grid.Row="1" HorizontalOptions="Fill" VerticalOptions="Fill">
+        <maps:SfMaps.Layer>
+            <maps:MapTileLayer x:Name="tileLayer"
+                 ShowMarkerTooltip="True"
+                 Markers="{Binding Markers}">
+                
+            <maps:MapTileLayer.MarkerTooltipTemplate>
+                <DataTemplate>
+                    <Border BackgroundColor="#222222"
+                            Stroke="Gray"
+                            StrokeThickness="1"
+                            MinimumWidthRequest="140"
+                            MinimumHeightRequest="50">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+
+                        <Grid Padding="10" RowSpacing="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Label Grid.Row="0" 
+                                Text="{Binding DataItem.Name}" 
+                                FontAttributes="Bold" 
+                                TextColor="White" 
+                                FontSize="14" />
+
+                            <Label Grid.Row="1" 
+                                Text="{Binding DataItem.LocationName}" 
+                                TextColor="LightGray" 
+                                FontSize="12" />
+                            
+                            <Label Grid.Row="2" 
+                                Text="{Binding DataItem.CollectionName}" 
+                                TextColor="LightGray" 
+                                FontSize="12" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </maps:MapTileLayer.MarkerTooltipTemplate>
+
+                <maps:MapTileLayer.ZoomPanBehavior>
+                    <maps:MapZoomPanBehavior ZoomLevel="2" EnableZooming="True" EnablePanning="True" EnableDoubleTapZooming="True"/>
+                </maps:MapTileLayer.ZoomPanBehavior>
+
+            </maps:MapTileLayer>
+        </maps:SfMaps.Layer>
+    </maps:SfMaps>
     </Grid>
-
 </ContentPage>

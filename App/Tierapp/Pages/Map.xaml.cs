@@ -1,89 +1,39 @@
 using Tierapp.ViewModels;
-using Microsoft.Extensions.Configuration;
-#if ANDROID
-using Android.Webkit;
-using Android.Views;
-#endif
+using Syncfusion.Maui.Maps;
+using Tierapp.Views;
 
 namespace Tierapp;
 
 public partial class Map : ContentPage
 {
-    private bool _isInitialized = false;
 
-    public Map()
+    private readonly MapView _viewModel;
+    public Map(MapView viewModel)
     {
         InitializeComponent();
+        _viewModel = viewModel;
+        BindingContext = _viewModel;
 
-        // 1. Events abonnieren
-        MapWebView.Navigated += OnWebViewNavigated;
-        MapWebView.Navigating += OnWebViewNavigating;
-
-#if ANDROID
-        MapWebView.HandlerChanged += OnMapWebViewHandlerChanged;
-#endif
+        tileLayer.UrlTemplate = $"https://tiles.stadiamaps.com/tiles/alidade_smooth/{{z}}/{{x}}/{{y}}.png?api_key={MapConfig.MapApiKey}";
     }
-
-#if ANDROID
-    private void OnMapWebViewHandlerChanged(object sender, EventArgs e)
-    {
-        if (MapWebView.Handler?.PlatformView is Android.Webkit.WebView platformWebView)
-        {
-            platformWebView.Settings.JavaScriptEnabled = true;
-            platformWebView.Settings.DomStorageEnabled = true;
-            platformWebView.Settings.MixedContentMode = Android.Webkit.MixedContentHandling.CompatibilityMode;
-            platformWebView.SetLayerType(Android.Views.LayerType.Hardware, null);
-        }
-    }
-#endif
 
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        if (_isInitialized) return;
+        // Daten beim Anzeigen der Seite laden
+        await _viewModel.LoadLocationsAsync();
 
-        try
-        {
-            using var stream = await FileSystem.OpenAppPackageFileAsync("map.html");
-            using var reader = new StreamReader(stream);
-            string htmlContent = await reader.ReadToEndAsync();
+    /*
+        // Marker werden aus Mapview in eine MapMarkerCollection geladen um sie dort anzuzeigen
+        var collection = new MapMarkerCollection();
 
-            MapWebView.Source = new HtmlWebViewSource { Html = htmlContent, BaseUrl = "https://cdn.maptiler.com/" };
-            _isInitialized = true;
-        }
-        catch (Exception ex)
+        foreach (var marker in _viewModel.Markers)
         {
-            Console.WriteLine($"Fehler: {ex.Message}");
+            collection.Add(marker);
         }
+        tileLayer.Markers = collection;
+    */ 
     }
 
-    private async void OnWebViewNavigated(object sender, WebNavigatedEventArgs e)
-    {
-        if (e.Result == WebNavigationResult.Success)
-        {
-
-            string apiKey = "0";
-
-            // Wir rufen die globale Funktion "window.initializeMap" auf
-            string jsCommand = $"window.initializeMap('{apiKey}');";
-
-            await MapWebView.EvaluateJavaScriptAsync(jsCommand);
-            System.Diagnostics.Debug.WriteLine("JS Befehl gesendet: " + jsCommand);
-        }
-    }
-
-    private void OnWebViewNavigating(object sender, WebNavigatingEventArgs e)
-    {
-        if (e.Url.StartsWith("maui://pinclick"))
-        {
-            e.Cancel = true;
-
-            var uri = new Uri(e.Url);
-            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-            string pinName = query["name"] ?? "Unbekanntes Tier";
-
-            DisplayAlert("Tierdatenbank", $"Details für: {pinName}", "OK");
-        }
-    }
 }
 
