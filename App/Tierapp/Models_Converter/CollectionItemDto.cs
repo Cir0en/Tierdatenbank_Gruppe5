@@ -15,6 +15,8 @@ public partial class CollectionItemDto
     public string? Status { get; set; }
     public TaxonomyDto? Taxonomy { get; set; }
 
+    public int CollectionId { get; set; }
+
     [JsonConverter(typeof(FlexibleStringConverter))]
     public string? FindingLocation { get; set; }
     public string? Kategorie { get; set; }

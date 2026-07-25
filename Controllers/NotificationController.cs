@@ -64,7 +64,7 @@ public class NotificationsController : ControllerBase
 
     // GET api/notifications/history?limit=50
     [HttpGet("history")]
-    public async Task<IActionResult> History([FromQuery] int limit = 50)
+    public async Task<IActionResult> History([FromQuery] int limit = 5)
     {
         var notifications = await _context.Notifications
             .OrderByDescending(n => n.SentAt)

@@ -18,6 +18,9 @@
         <Tab Title="{translator:Translate Collections}" Icon="sammlungicon.svg" Route="CollectionsTab">
             <ShellContent ContentTemplate="{DataTemplate local:Sammlungen}" />
         </Tab>
+        <Tab Title="{translator:Translate Map}" Icon="mapicon.svg" Route="MapTab">
+            <ShellContent ContentTemplate="{DataTemplate local:Map}" />
+        </Tab>
         <Tab Title="{translator:Translate Settings}" Icon="settingsicon.svg" Route="SettingsTab">
             <ShellContent ContentTemplate="{DataTemplate local:Settings}" />
         </Tab>

@@ -9,6 +9,7 @@ using Tierapp.Views;
 using Microsoft.Maui.LifecycleEvents;
 using Microsoft.Extensions.Configuration;
 using System.Reflection;
+using Syncfusion.Maui.Core.Hosting;
 
 namespace Tierapp;
 
@@ -19,6 +20,7 @@ public static class MauiProgram
 		var builder = MauiApp.CreateBuilder();
 		builder
 			.UseMauiApp<App>()
+			.ConfigureSyncfusionCore()
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -59,6 +61,7 @@ public static class MauiProgram
 		services.AddTransient<DashboardViewModel>();
 		services.AddTransient<SammlungDetailsViewModel>();
 		services.AddTransient<AnimalDetailViewModel>();
+		services.AddTransient<MapView>();
 
 		// Pages registrieren
 		services.AddTransient<Dashboard>();
@@ -67,7 +70,7 @@ public static class MauiProgram
 		services.AddTransient<SammlungDetails>();
 		services.AddTransient<AnimalDetail>();
 		services.AddTransient<SplashPage>();
-		//services.AddTransient<Map>();
+		services.AddTransient<Map>();
 	} 
 
 }

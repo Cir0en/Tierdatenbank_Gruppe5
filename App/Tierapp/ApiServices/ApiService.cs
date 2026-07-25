@@ -109,4 +109,11 @@ public class ApiService
             return false;
         }
     }
+
+    public async Task<List<GeoLocation>> GetLocationsAsync()
+    {
+        var response = await _httpClient.GetFromJsonAsync<List<GeoLocation>>("api/geolocations");
+        return response ?? new List<GeoLocation>();
+    }
+
 }
