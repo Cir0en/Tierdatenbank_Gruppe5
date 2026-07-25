@@ -66,7 +66,7 @@ public partial class NeondbContext : DbContext
             entity.Property(e => e.AgeClass).HasColumnName("age_class");
             entity.Property(e => e.BodyMassGram).HasColumnName("body_mass_gram");
             entity.Property(e => e.BodyLengthMm).HasColumnName("body_length_mm");
-            // Kategorie + Lebensraum: [NotMapped] bis ALTER TABLE ausgeführt wurde
+            // Lebensraum: [NotMapped] bis ALTER TABLE ausgeführt wurde
 
             entity.HasOne(d => d.Collection).WithMany(p => p.CollectItems)
                 .HasForeignKey(d => d.CollectionId)
@@ -82,6 +82,13 @@ public partial class NeondbContext : DbContext
                 .HasForeignKey(d => d.TaxonomyId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("collect_items_taxonomy_id_fkey");
+
+            entity.Property(e => e.CreatedByUserId).HasColumnName("created_by_user_id");
+
+            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.CreatedCollectItems)
+                .HasForeignKey(d => d.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("collect_items_created_by_user_id_fkey");
         });
 
         // Löschen des Besitzer-Users löscht auch dessen Sammlungen (Cascade).
@@ -143,11 +150,12 @@ public partial class NeondbContext : DbContext
 
             entity.HasIndex(e => e.ObjectId, "idx_loans_object");
 
-            // Verhindert auf DB-Ebene, dass dasselbe Objekt gleichzeitig zwei offene Leihen hat
-            // (siehe sql/2026-07-02_add_unique_open_loan_index.sql für das manuelle Anlegen in Neon).
+            // Verhindert auf DB-Ebene, dass dasselbe Objekt gleichzeitig zwei aktive/in Prüfung
+            // befindliche Leihvorgänge hat (siehe sql/2026-07-02_add_unique_open_loan_index.sql und
+            // sql/2026-07-16b_add_loan_moderation_status.sql für das manuelle Anlegen in Neon).
             entity.HasIndex(e => e.ObjectId, "idx_loans_object_open_unique")
                 .IsUnique()
-                .HasFilter("status = 'offen'");
+                .HasFilter("status IN ('offen', 'in_pruefung')");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.BorrowerId).HasColumnName("borrower_id");

@@ -47,4 +47,7 @@ public partial class User
     public virtual ICollection<Loan> LoanLenders { get; set; } = new List<Loan>();
 
     public virtual ICollection<Taxonomy> Taxonomies { get; set; } = new List<Taxonomy>();
+
+    /// <summary>Fundobjekte (CollectItems), die dieser Nutzer angelegt hat.</summary>
+    public virtual ICollection<CollectItem> CreatedCollectItems { get; set; } = new List<CollectItem>();
 }

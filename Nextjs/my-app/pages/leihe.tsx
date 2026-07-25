@@ -41,7 +41,7 @@ type MyObject = { id: number; name: string | null; collectionName: string | null
 type LoanUser = { id: number; username: string; firstName: string | null; lastName: string | null; institution: string | null };
 
 type FilterRole = "alle" | "verleiher" | "entleiher";
-type FilterStatus = "alle" | "aktiv" | "ueberfaellig" | "zurueck";
+type FilterStatus = "alle" | "angefragt" | "pruefung" | "aktiv" | "ueberfaellig" | "zurueck" | "abgelehnt";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -60,7 +60,10 @@ function displayName(first: string | null, last: string | null, username: string
 
 // Übersetzt den rohen Backend-Status in den in der UI angezeigten Status.
 // Überfällige Leihen haben Vorrang vor dem gespeicherten Status.
-function effectiveStatus(loan: Loan): "aktiv" | "überfällig" | "zurückgegeben" {
+function effectiveStatus(loan: Loan): "angefragt" | "in Prüfung" | "aktiv" | "überfällig" | "zurückgegeben" | "abgelehnt" {
+  if (loan.status === "angefragt") return "angefragt";
+  if (loan.status === "in_pruefung") return "in Prüfung";
+  if (loan.status === "abgelehnt") return "abgelehnt";
   if (loan.isOverdue) return "überfällig";
   if (loan.status === "zurückgegeben") return "zurückgegeben";
   return "aktiv"; // DB speichert laufende Leihen als 'offen', UI zeigt 'aktiv'
@@ -70,9 +73,12 @@ function effectiveStatus(loan: Loan): "aktiv" | "überfällig" | "zurückgegeben
 function StatusPill({ loan }: { loan: Loan }) {
   const s = effectiveStatus(loan);
   const cls: Record<string, string> = {
+    "angefragt": "pill pill--yellow",
+    "in Prüfung": "pill pill--blue",
     "aktiv": "pill pill--green",
     "überfällig": "pill pill--red",
     "zurückgegeben": "pill pill--gray",
+    "abgelehnt": "pill pill--gray",
   };
   return <span className={cls[s]}>{s}</span>;
 }
@@ -428,10 +434,60 @@ export default function LeihePage() {
     }
   };
 
-  // Löscht eine Leihe nach Bestätigungsdialog (nur für den Verleiher sichtbar/möglich).
-  const handleDelete = async (loanId: number) => {
+  // Bestätigt eine Ausleih-Anfrage (nur Verleiher, nur aus Status "angefragt"). Andere offene
+  // Anfragen für dasselbe Objekt werden serverseitig automatisch abgelehnt (siehe LoanController).
+  const handleApprove = async (loanId: number) => {
     if (!clerkId) return;
-    if (!confirm("Leihe wirklich löschen?")) return;
+    setActionError(null);
+    setBusyId(loanId);
+    try {
+      const auth = await authHeaders();
+      const res = await fetch(`${API}/api/loan/${loanId}/approve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...auth },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setActionError(body.message ?? `Fehler ${res.status} — Anfrage konnte nicht bestätigt werden.`);
+      }
+    } catch {
+      setActionError("Server nicht erreichbar — Anfrage konnte nicht bestätigt werden.");
+    } finally {
+      setBusyId(null);
+      fetchLoans();
+      fetchSupportData();
+    }
+  };
+
+  // Lehnt eine Ausleih-Anfrage ab (nur Verleiher, nur aus Status "angefragt").
+  const handleReject = async (loanId: number) => {
+    if (!clerkId) return;
+    setActionError(null);
+    setBusyId(loanId);
+    try {
+      const auth = await authHeaders();
+      const res = await fetch(`${API}/api/loan/${loanId}/reject`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...auth },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setActionError(body.message ?? `Fehler ${res.status} — Anfrage konnte nicht abgelehnt werden.`);
+      }
+    } catch {
+      setActionError("Server nicht erreichbar — Anfrage konnte nicht abgelehnt werden.");
+    } finally {
+      setBusyId(null);
+      fetchLoans();
+    }
+  };
+
+  // Löscht eine Leihe nach Bestätigungsdialog. Für den Verleiher jede eigene Leihe möglich;
+  // der Entleiher darf darüber zusätzlich eine eigene, noch unbestätigte Anfrage zurückziehen
+  // (siehe LoanController.DeleteLoan).
+  const handleDelete = async (loanId: number, isOwnPendingRequest: boolean) => {
+    if (!clerkId) return;
+    if (!confirm(isOwnPendingRequest ? "Anfrage wirklich zurückziehen?" : "Leihe wirklich löschen?")) return;
     setActionError(null);
     setBusyId(loanId);
     try {
@@ -465,17 +521,22 @@ export default function LeihePage() {
     const eff = effectiveStatus(l);
     const statusOk =
       filterStatus === "alle" ||
+      (filterStatus === "angefragt"    && eff === "angefragt")  ||
+      (filterStatus === "pruefung"     && eff === "in Prüfung") ||
       (filterStatus === "aktiv"        && eff === "aktiv")      ||
       (filterStatus === "ueberfaellig" && eff === "überfällig") ||
-      (filterStatus === "zurueck"      && eff === "zurückgegeben");
+      (filterStatus === "zurueck"      && eff === "zurückgegeben") ||
+      (filterStatus === "abgelehnt"    && eff === "abgelehnt");
 
     return roleOk && statusOk;
   });
 
   // Kennzahlen für die Stat-Kacheln oben auf der Seite (ungefiltert, über alle Leihen).
-  const activeCount   = loans.filter((l) => l.status === "offen" && !l.isOverdue).length;
-  const overdueCount  = loans.filter((l) => l.isOverdue).length;
-  const returnedCount = loans.filter((l) => l.status === "zurückgegeben").length;
+  const requestedCount = loans.filter((l) => l.status === "angefragt").length;
+  const reviewCount    = loans.filter((l) => l.status === "in_pruefung").length;
+  const activeCount    = loans.filter((l) => l.status === "offen" && !l.isOverdue).length;
+  const overdueCount   = loans.filter((l) => l.isOverdue).length;
+  const returnedCount  = loans.filter((l) => l.status === "zurückgegeben").length;
 
   return (
     <>
@@ -493,7 +554,7 @@ export default function LeihePage() {
         .content { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 18px; }
 
         /* Stats */
-        .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+        .stat-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
         .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px; }
         .stat-value { font-size: 26px; font-weight: 700; color: #111827; line-height: 1; }
         .stat-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
@@ -529,9 +590,11 @@ export default function LeihePage() {
 
         /* Pills */
         .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-        .pill--green { background: #d1fae5; color: #065f46; }
-        .pill--red   { background: #fee2e2; color: #991b1b; }
-        .pill--gray  { background: #f3f4f6; color: #6b7280; }
+        .pill--green  { background: #d1fae5; color: #065f46; }
+        .pill--red    { background: #fee2e2; color: #991b1b; }
+        .pill--gray   { background: #f3f4f6; color: #6b7280; }
+        .pill--yellow { background: #fef3c7; color: #92400e; }
+        .pill--blue   { background: #dbeafe; color: #1e40af; }
 
         .role-chip { display: inline-flex; align-items: center; font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600; margin-left: 6px; }
         .role-chip--lender   { background: #dbeafe; color: #1e40af; }
@@ -598,6 +661,14 @@ export default function LeihePage() {
                 <div className="stat-label">Leihen gesamt</div>
               </div>
               <div className="stat-card">
+                <div className="stat-value" style={{ color: requestedCount > 0 ? "#92400e" : undefined }}>{requestedCount}</div>
+                <div className="stat-label">Anfragen</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: reviewCount > 0 ? "#1e40af" : undefined }}>{reviewCount}</div>
+                <div className="stat-label">In Prüfung</div>
+              </div>
+              <div className="stat-card">
                 <div className="stat-value">{activeCount}</div>
                 <div className="stat-label">Aktiv</div>
               </div>
@@ -625,13 +696,13 @@ export default function LeihePage() {
                 ))}
               </div>
               <div className="filter-group">
-                {(["alle", "aktiv", "ueberfaellig", "zurueck"] as FilterStatus[]).map((s) => (
+                {(["alle", "angefragt", "pruefung", "aktiv", "ueberfaellig", "zurueck", "abgelehnt"] as FilterStatus[]).map((s) => (
                   <button
                     key={s}
                     className={`filter-btn${filterStatus === s ? " active" : ""}`}
                     onClick={() => setFilterStatus(s)}
                   >
-                    {s === "alle" ? "Alle Status" : s === "aktiv" ? "Aktiv" : s === "ueberfaellig" ? "Überfällig" : "Zurückgegeben"}
+                    {s === "alle" ? "Alle Status" : s === "angefragt" ? "Angefragt" : s === "pruefung" ? "In Prüfung" : s === "aktiv" ? "Aktiv" : s === "ueberfaellig" ? "Überfällig" : s === "zurueck" ? "Zurückgegeben" : "Abgelehnt"}
                   </button>
                 ))}
               </div>
@@ -690,6 +761,26 @@ export default function LeihePage() {
                           <td><StatusPill loan={loan} /></td>
                           <td>
                             <div className="td-actions">
+                              {isLender && loan.status === "angefragt" && (
+                                <>
+                                  <button
+                                    className="tbl-btn"
+                                    disabled={busyId === loan.id}
+                                    onClick={() => handleApprove(loan.id)}
+                                    title="Anfrage bestätigen"
+                                  >
+                                    Bestätigen
+                                  </button>
+                                  <button
+                                    className="tbl-btn tbl-btn--danger"
+                                    disabled={busyId === loan.id}
+                                    onClick={() => handleReject(loan.id)}
+                                    title="Anfrage ablehnen"
+                                  >
+                                    Ablehnen
+                                  </button>
+                                </>
+                              )}
                               {isLender && loan.status === "offen" && (
                                 <>
                                   <button
@@ -714,13 +805,25 @@ export default function LeihePage() {
                                 <button
                                   className="tbl-btn tbl-btn--danger"
                                   disabled={busyId === loan.id}
-                                  onClick={() => handleDelete(loan.id)}
+                                  onClick={() => handleDelete(loan.id, false)}
                                   title="Leihe löschen"
                                 >
                                   Löschen
                                 </button>
                               )}
-                              {!isLender && <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
+                              {!isLender && isBorrower && loan.status === "angefragt" && (
+                                <button
+                                  className="tbl-btn tbl-btn--danger"
+                                  disabled={busyId === loan.id}
+                                  onClick={() => handleDelete(loan.id, true)}
+                                  title="Eigene Anfrage zurückziehen"
+                                >
+                                  Anfrage zurückziehen
+                                </button>
+                              )}
+                              {!isLender && !(isBorrower && loan.status === "angefragt") && (
+                                <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>
+                              )}
                             </div>
                           </td>
                         </tr>

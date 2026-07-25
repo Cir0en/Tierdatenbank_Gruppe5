@@ -10,13 +10,42 @@ import { Map, MapStyle, config, Marker, Popup } from '@maptiler/sdk';
 import '@maptiler/sdk/dist/maptiler-sdk.css';
 import Navbar from '../components/Navbar';
 import { useAuth } from '@clerk/nextjs';
+import { useTaxonomyFilter, TaxonomyFilterControl } from '../components/TaxonomyFilter';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? '';
-const KATEGORIE_OPTIONS = ['Insekten','Säugetiere','Vögel','Amphibien','Reptilien','Fische','Spinnentiere','Schnecken','Sonstige'];
 const SELTENHEIT_OPTIONS = ['Häufig','Selten','Sehr selten','Ungefährdet','Wichtig','Geschützt','Stark gefährdet'];
 
-interface TaxonomyOption { id: number; name: string; rank: string | null; }
 interface CollectionOption { id: number; name: string; isPublic: boolean; }
+
+// GBIF-Taxonomie-Abgleich (Global Biodiversity Information Facility): entweder
+// ein eindeutiger Treffer (match_found) oder eine Liste von Vorschlägen, die
+// der Nutzer manuell bestätigen muss.
+interface GbifTaxonomy {
+  reich: string; stamm: string; klasse: string;
+  ordnung: string; familie: string; gattung: string; art: string;
+}
+interface GbifMatchResult {
+  status: 'match_found';
+  source?: 'gbif' | 'local';
+  usageKey?: number;
+  taxonomyId?: number;
+  confidence?: number;
+  canonicalName: string;
+  taxonomy: GbifTaxonomy;
+}
+interface GbifSuggestion {
+  source?: 'gbif' | 'local';
+  usageKey?: number;
+  taxonomyId?: number;
+  scientificName?: string;
+  canonicalName?: string;
+  rank?: string;
+}
+interface GbifNeedsConfirmation {
+  status: 'needs_confirmation';
+  suggestions: GbifSuggestion[];
+}
+type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
 
 interface MapItem {
   itemId: number;
@@ -25,30 +54,34 @@ interface MapItem {
   latitude: number;
   longitude: number;
   sex: string | null;
+  canDelete: boolean;
+  // Verknüpfte Taxonomie (aus /api/geolocations/map-items) — Basis für den Taxonomie-Filter.
+  taxonomyId: number | null;
 }
 
 // ── Tier-Erfassungs-Panel (fixed overlay – immer vollständig sichtbar) ─────────
 
 // Formular-Panel, das sich öffnet, wenn ein angemeldeter Nutzer auf die Karte
-// klickt. Erfasst die Tierdaten (Name, Kategorie, Maße, ...) für die zuvor per
+// klickt. Erfasst die Tierdaten (Name, Taxonomie, Maße, ...) für die zuvor per
 // Klick ermittelten Koordinaten (coords) und legt bei Bestätigung einen neuen
 // Datensatz über die Animals-API an. Lädt außerdem die eigenen (Owner-)Sammlungen
 // des Nutzers nach, damit das neue Tier optional direkt einer Sammlung zugeordnet
-// werden kann.
-function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
-  taxonomies: TaxonomyOption[];
+// werden kann. Die Felder entsprechen exakt dem Formular zum Hinzufügen eines
+// Tiers zu einer Sammlung (AddAnimalModal in Sammlung.tsx), inkl. GBIF-Workflow.
+function TierFormPanel({ coords, locationName, userId, onClose, onSaved }: {
   coords: { lng: number; lat: number };
+  locationName: string | null;
   userId: string | null | undefined;
   onClose: () => void;
-  onSaved: (name: string, sex: string, id: number) => void;
+  onSaved: (name: string, sex: string, id: number, locationName: string, taxonomyId: number | null) => void;
 }) {
+  const [displayName, setDisplayName] = useState('');
   const [name, setName]             = useState('');
   const [description, setDesc]      = useState('');
-  const [kategorie, setKategorie]   = useState('');
   const [seltenheit, setSeltenheit] = useState('');
   const [lebensraum, setLebensraum] = useState('');
   const [findDate, setFindDate]     = useState('');
-  const [taxonomyId, setTaxonomyId] = useState('');
+  const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
   const [collectionId, setCollectionId] = useState('');
   const [sex, setSex]               = useState('Unbekannt');
   const [ageClass, setAgeClass]     = useState('');
@@ -57,7 +90,18 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [nameErr, setNameErr]       = useState(false);
+  const [collectionErr, setCollectionErr] = useState(false);
   const [collections, setCollections] = useState<CollectionOption[]>([]);
+  const fallbackLocationName = `Naturstandort (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)})`;
+  const [locationNameInput, setLocationNameInput] = useState(locationName ?? fallbackLocationName);
+
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
+
+  const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
+  const [gbifLoading, setGbifLoading]     = useState(false);
+  const [gbifError, setGbifError]         = useState<string | null>(null);
+  const [confirmedName, setConfirmedName] = useState<string | null>(null);
+  const [confirming, setConfirming]       = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -66,46 +110,120 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
       .then((data: any[]) =>
         setCollections(data.filter(c => c.isOwner).map(c => ({ id: c.id, name: c.name, isPublic: c.isPublic })))
       )
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setCollectionsLoaded(true));
   }, [userId]);
 
-  // Validiert minimal (Artname erforderlich) und legt das neue Tier inkl.
+  // Setzt den kompletten GBIF-Zustand zurück (z. B. wenn der Artname geändert
+  // wird und ein vorheriger Treffer/Vorschlag damit ungültig wird).
+  const resetGbif = () => {
+    setGbifResult(null);
+    setConfirmedName(null);
+    setTaxonomyId(null);
+    setGbifError(null);
+  };
+
+  // Fragt die GBIF-Taxonomie-API mit dem eingegebenen Artnamen ab. Ergebnis ist
+  // entweder ein eindeutiger Treffer oder eine Liste von Vorschlägen (siehe GbifResult).
+  const handleGbifSearch = async () => {
+    if (!name.trim()) return;
+    setGbifLoading(true);
+    resetGbif();
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGbifResult(await res.json());
+    } catch (e: any) {
+      setGbifError('GBIF-Suche fehlgeschlagen: ' + e.message);
+    } finally {
+      setGbifLoading(false);
+    }
+  };
+
+  // Bestätigt einen GBIF-Treffer/-Vorschlag (per usageKey): das Backend legt
+  // dafür ggf. einen Taxonomie-Datensatz an/findet ihn und liefert dessen id
+  // zurück, die anschließend beim Speichern des Tiers mitgeschickt wird.
+  const handleGbifConfirm = async (usageKey: number, displayName: string) => {
+    setConfirming(true);
+    setGbifError(null);
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageKey }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTaxonomyId(data.taxonomyId);
+      setConfirmedName(displayName);
+      setGbifResult(null);
+    } catch (e: any) {
+      setGbifError('Bestätigung fehlgeschlagen: ' + e.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // Übernimmt einen lokalen Treffer/Vorschlag direkt: der Taxonomie-Eintrag existiert
+  // bereits in der Datenbank (manuell eingereicht und freigegeben), daher ist anders als
+  // bei GBIF-Treffern kein Bestätigungs-Request nötig.
+  const selectLocalTaxonomy = (id: number, displayName: string) => {
+    setTaxonomyId(id);
+    setConfirmedName(displayName);
+    setGbifResult(null);
+  };
+
+  // Validiert minimal (Name erforderlich) und legt das neue Tier inkl.
   // Koordinaten per POST an. Bei Erfolg wird onSaved() aufgerufen, damit die
   // Elternkomponente (MapPage) direkt einen Marker an der geklickten Position
   // ergänzen kann, ohne die komplette Marker-Liste neu laden zu müssen.
   const handleSave = async () => {
-    if (!name.trim()) { setNameErr(true); return; }
+    // Name UND Sammlung sind Pflicht: ein Tier muss immer einer eigenen Sammlung
+    // zugeordnet werden (ohne Sammlung kann kein Eintrag gespeichert werden).
+    let invalid = false;
+    if (!displayName.trim()) { setNameErr(true); invalid = true; }
+    if (!collectionId)       { setCollectionErr(true); invalid = true; }
+    if (invalid) return;
+
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`${API}/api/animals/map`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Clerk-User-Id mitschicken, damit das Backend die Sammlungs-Eigentümerschaft
+          // prüfen und den Ersteller (CreatedByUserId) setzen kann.
+          ...(userId ? { 'X-Clerk-User-Id': userId } : {}),
+        },
         body: JSON.stringify({
-          name:         name.trim(),
+          name:         displayName.trim(),
           sex:          sex === 'Unbekannt' ? null : sex,
           ageClass:     ageClass || null,
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           latitude:     coords.lat,
           longitude:    coords.lng,
+          locationName: locationNameInput.trim() || fallbackLocationName,
           description:  description.trim() || null,
           status:       seltenheit || null,
-          kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           findDate:     findDate || null,
-          taxonomyId:   taxonomyId   ? parseInt(taxonomyId)   : null,
-          collectionId: collectionId ? parseInt(collectionId) : null,
+          taxonomyId:   taxonomyId,
+          collectionId: parseInt(collectionId),
         }),
       });
       if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
       const saved = await res.json();
-      onSaved(name.trim(), sex, saved.id);
+      onSaved(displayName.trim(), sex, saved.id, locationNameInput.trim() || fallbackLocationName, taxonomyId);
     } catch (err: any) {
       setError(err.message);
       setSaving(false);
     }
   };
+
+  const matchResult  = gbifResult?.status === 'match_found'        ? gbifResult as GbifMatchResult       : null;
+  const needsConfirm = gbifResult?.status === 'needs_confirmation'  ? gbifResult as GbifNeedsConfirmation : null;
 
   return (
     <div className="tp-overlay" onClick={saving ? undefined : onClose}>
@@ -120,14 +238,108 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
           {error && <div className="tp-error">{error}</div>}
 
           <div className="tp-group">
-            <label className="tp-label">Artname <span className="tp-req">*</span></label>
+            <label className="tp-label">Name <span className="tp-req">*</span></label>
             <input
               className={`tp-input${nameErr ? ' tp-input-err' : ''}`}
-              type="text" autoFocus placeholder="z. B. Papilio machaon"
-              value={name}
-              onChange={e => { setName(e.target.value); setNameErr(false); }}
+              type="text" autoFocus placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
+              value={displayName}
+              onChange={e => { setDisplayName(e.target.value); setNameErr(false); }}
             />
-            {nameErr && <span className="tp-hint">Bitte Artname eingeben.</span>}
+            {nameErr && <span className="tp-hint">Bitte einen Namen eingeben.</span>}
+          </div>
+
+          {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
+          <div className="tp-group">
+            <label className="tp-label">Artname (Taxonomie-Suche)</label>
+            <div className="tp-gbif-search-row">
+              <input type="text" className="tp-input"
+                placeholder="z. B. Parnassius apollo"
+                value={name}
+                onChange={e => { setName(e.target.value); resetGbif(); }}
+                onKeyDown={e => { if (e.key === 'Enter') handleGbifSearch(); }} />
+              <button type="button" className="tp-btn-gbif-search"
+                onClick={handleGbifSearch}
+                disabled={!name.trim() || gbifLoading || saving}>
+                {gbifLoading ? '⏳' : '🔍 Suchen'}
+              </button>
+            </div>
+            <div className="tp-gbif-hint">Wissenschaftlichen Artnamen eingeben und Suchen klicken, um die Taxonomie automatisch zuzuordnen.</div>
+          </div>
+
+          {gbifError && <div className="tp-error">{gbifError}</div>}
+
+          {/* Bestätigte Taxonomie */}
+          {confirmedName && (
+            <div className="tp-gbif-confirmed">
+              <span>✓ Taxonomie: <em>{confirmedName}</em></span>
+              <button type="button" onClick={resetGbif} title="Zurücksetzen">✕</button>
+            </div>
+          )}
+
+          {/* GBIF/lokaler Treffer */}
+          {matchResult && (
+            <div className="tp-gbif-preview">
+              <div className="tp-gbif-preview-title">
+                {matchResult.source === 'local'
+                  ? 'Bereits in der Datenbank vorhanden'
+                  : `GBIF-Treffer — ${matchResult.confidence}% Übereinstimmung`}
+              </div>
+              <div className="tp-gbif-chain">
+                {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
+                  <span key={rank} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span className="tp-gbif-chain-item">
+                      <span className="tp-gbif-rank">{rank}</span>
+                      <span className="tp-gbif-val">{val}</span>
+                    </span>
+                    {i < arr.length - 1 && <span className="tp-gbif-arrow">›</span>}
+                  </span>
+                ))}
+              </div>
+              <button type="button" className="tp-btn-gbif-accept" disabled={confirming}
+                onClick={() => matchResult.source === 'local' && matchResult.taxonomyId
+                  ? selectLocalTaxonomy(matchResult.taxonomyId, matchResult.canonicalName)
+                  : handleGbifConfirm(matchResult.usageKey!, matchResult.canonicalName)}>
+                {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
+              </button>
+            </div>
+          )}
+
+          {/* GBIF/lokale Vorschläge */}
+          {needsConfirm && (
+            <div className="tp-gbif-preview tp-gbif-preview--warn">
+              <div className="tp-gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
+              {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).length > 0 ? (
+                <>
+                  <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
+                  {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).map((s, i) => (
+                    <button key={i} type="button" className="tp-btn-gbif-suggestion" disabled={confirming}
+                      onClick={() => s.source === 'local' && s.taxonomyId
+                        ? selectLocalTaxonomy(s.taxonomyId, s.canonicalName ?? s.scientificName ?? 'Unbekannt')
+                        : handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                      <em>{s.canonicalName ?? s.scientificName}</em>
+                      {s.rank && <span className="tp-gbif-rank"> [{s.rank}]</span>}
+                      {s.source === 'local' && <span className="tp-gbif-rank"> · lokal</span>}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+              )}
+            </div>
+          )}
+
+          <div className="tp-group">
+            <label className="tp-label">Fundort</label>
+            <input
+              className="tp-input"
+              type="text"
+              value={locationNameInput}
+              onChange={e => setLocationNameInput(e.target.value)}
+              placeholder="z. B. Buchenwald oberhalb der Siegquelle"
+            />
+            <span className="tp-hint">
+              Automatisch aus den Koordinaten vorgeschlagen. Du kannst den Fundort anpassen.
+            </span>
           </div>
 
           <div className="tp-group">
@@ -136,60 +348,56 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
               value={description} onChange={e => setDesc(e.target.value)} />
           </div>
 
-          <div className="tp-row">
-            <div className="tp-group">
-              <label className="tp-label">Tier-Kategorie</label>
-              <select className="tp-input tp-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
-                <option value="">— nicht angegeben —</option>
-                {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-            <div className="tp-group">
-              <label className="tp-label">Seltenheit</label>
-              <select className="tp-input tp-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
-                <option value="">— nicht angegeben —</option>
-                {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
           <div className="tp-group">
-            <label className="tp-label">Lebensraum</label>
-            <input className="tp-input" type="text" placeholder="z. B. Alpine Wiesen, Berghänge"
-              value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+            <label className="tp-label">Seltenheit</label>
+            <select className="tp-input tp-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+              <option value="">— nicht angegeben —</option>
+              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
           </div>
 
           <div className="tp-row">
+            <div className="tp-group">
+              <label className="tp-label">Lebensraum</label>
+              <input className="tp-input" type="text" placeholder="z. B. Alpine Wiesen, Berghänge"
+                value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+            </div>
             <div className="tp-group">
               <label className="tp-label">Funddatum</label>
               <input className="tp-input" type="date" value={findDate} onChange={e => setFindDate(e.target.value)} />
             </div>
-            <div className="tp-group">
-              <label className="tp-label">Wissenschaftlicher Name</label>
-              <select className="tp-input tp-select" value={taxonomyId} onChange={e => setTaxonomyId(e.target.value)}>
-                <option value="">— keine —</option>
-                {taxonomies.map(t => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.rank ? `[${t.rank}] ` : ''}{t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
-          {collections.length > 0 && (
-            <div className="tp-group">
-              <label className="tp-label">Sammlung</label>
-              <select className="tp-input tp-select" value={collectionId} onChange={e => setCollectionId(e.target.value)}>
-                <option value="">— keine Sammlung —</option>
-                {collections.map(c => (
-                  <option key={c.id} value={String(c.id)}>
-                    {c.isPublic ? '🌐' : '🔒'} {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Sammlung ist Pflicht: jedes Tier muss einer eigenen Sammlung zugeordnet werden.
+              Hat der Nutzer noch keine Sammlung, wird ein Hinweis mit Link zum Anlegen gezeigt
+              und das Speichern ist nicht möglich (siehe handleSave + deaktivierter Save-Button). */}
+          <div className="tp-group">
+            <label className="tp-label">Sammlung <span className="tp-req">*</span></label>
+            {collections.length > 0 ? (
+              <>
+                <select
+                  className={`tp-input tp-select${collectionErr ? ' tp-input-err' : ''}`}
+                  value={collectionId}
+                  onChange={e => { setCollectionId(e.target.value); setCollectionErr(false); }}
+                >
+                  <option value="">— bitte auswählen —</option>
+                  {collections.map(c => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.isPublic ? '🌐' : '🔒'} {c.name}
+                    </option>
+                  ))}
+                </select>
+                {collectionErr && <span className="tp-hint">Bitte eine Sammlung auswählen.</span>}
+              </>
+            ) : collectionsLoaded ? (
+              <div className="tp-no-collection">
+                Du hast noch keine eigene Sammlung. Lege zuerst eine Sammlung an, um ein Tier speichern zu können.
+                <a href="/Sammlung" className="tp-no-collection-link">→ Zu meinen Sammlungen</a>
+              </div>
+            ) : (
+              <div className="tp-gbif-hint">Sammlungen werden geladen…</div>
+            )}
+          </div>
 
           <div className="tp-group">
             <label className="tp-label">Geschlecht</label>
@@ -208,7 +416,7 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
             <label className="tp-label">Altersklasse</label>
             <select className="tp-input tp-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
               <option value="">— nicht angegeben —</option>
-              <option value="Juvenile">Juvenil</option>
+              <option value="Juvenil">Juvenil</option>
               <option value="Subadult">Subadult</option>
               <option value="Adult">Adult</option>
               <option value="Senior">Senior</option>
@@ -236,7 +444,12 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
 
           <div className="tp-actions">
             <button className="tp-btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
-            <button className="tp-btn-save"   disabled={saving} onClick={handleSave}>
+            <button
+              className="tp-btn-save"
+              disabled={saving || collections.length === 0}
+              title={collections.length === 0 ? 'Ohne eigene Sammlung kann kein Tier gespeichert werden.' : undefined}
+              onClick={handleSave}
+            >
               {saving ? '⏳ Wird gespeichert…' : '💾 Speichern'}
             </button>
           </div>
@@ -244,6 +457,113 @@ function TierFormPanel({ taxonomies, coords, userId, onClose, onSaved }: {
       </div>
     </div>
   );
+}
+
+// ── Hilfsfunktion für Reverse Geocoding  ────────────────────────────────────────────────────────────────
+
+// Neue Version für Reverse Geocoding, die Entfernung und Fallback berücksichtigt:
+// Warum? Weil die MapTiler-Geocoding-API manchmal einen Ort liefert,
+// der weit entfernt von den tatsächlichen Koordinaten liegt (z. B. wenn Fundort
+// in einem Waldgebiet ist, das keine genaue Adresse hat),
+// und wir möchten, dass die Anzeige in diesem Fall
+// "In der Nähe von ..." oder "Naturstandort bei ..." anzeigt,
+// statt eine ungenaue Adresse zu verwenden.
+
+interface ReverseGeocodeResult {
+  locationName: string;
+  distanceMeters: number | null;
+  isPrecise: boolean;
+}
+
+// Berechnung der Distanz mit der Haversine-Formel
+function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const earthRadius = 6371000;
+  const toRad = (v: number) => v * Math.PI / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) *
+    Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function reverseGeocode(lng: number, lat: number): Promise<ReverseGeocodeResult> {
+  const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const roundedLng = lng.toFixed(6);
+  const roundedLat = lat.toFixed(6);
+  const url =
+    `https://api.maptiler.com/geocoding/${roundedLng},${roundedLat}.json` +
+    `?key=${key}&language=de`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('MapTiler Reverse Geocoding Fehler:', res.status, errorText);
+    throw new Error('Adresse konnte nicht ermittelt werden');
+  }
+
+  const data = await res.json();
+  const features = data.features ?? [];
+
+  console.log(features.map((f: any) => ({
+  id: f.id,
+  text: f.text_de ?? f.text,
+  placeName: f.place_name_de ?? f.place_name,
+  placeType: f.place_type,
+  center: f.center,
+})));
+
+  if (features.length === 0) {
+    return {
+      locationName: `Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      distanceMeters: null,
+      isPrecise: false,
+    };
+  }
+
+  const best = features[0];
+  const [foundLng, foundLat] = best.center ?? [lng, lat];
+  const distance = distanceMeters(lng, lat, foundLng, foundLat);
+
+  const placeName =
+    best.place_name_de ??
+    best.place_name ??
+    best.text_de ??
+    best.text ??
+    'unbekannter Ort';
+
+  if (distance <= 100) {
+    return {
+      locationName: placeName,
+      distanceMeters: distance,
+      isPrecise: true,
+    };
+  }
+
+  if (distance <= 500) {
+    return {
+      locationName: `In der Nähe von ${placeName}`,
+      distanceMeters: distance,
+      isPrecise: false,
+    };
+  }
+
+  const shortPlace =
+    best.text_de ??
+    best.text ??
+    placeName;
+
+  return {
+    locationName: `Naturstandort bei ${shortPlace} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+    distanceMeters: distance,
+    isPrecise: false,
+  };
 }
 
 // ── Hauptseite ────────────────────────────────────────────────────────────────
@@ -270,7 +590,6 @@ export default function MapPage() {
 
   const [formOpen, setFormOpen]     = useState(false);
   const [formCoords, setFormCoords] = useState<{ lng: number; lat: number } | null>(null);
-  const [taxonomies, setTaxonomies] = useState<TaxonomyOption[]>([]);
 
   // ── Suche ─────────────────────────────────────────────────────────────
   // Alle geladenen Marker-Items werden hier gespiegelt, damit rein clientseitig
@@ -278,33 +597,74 @@ export default function MapPage() {
   const [items, setItems]           = useState<MapItem[]>([]);
   const [search, setSearch]         = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [formLocationName, setFormLocationName] = useState<string | null>(null);
+  const [geoResults, setGeoResults] = useState<any[]>([]);
+
+  // Wiederverwendbarer Taxonomie-Filter (geteiltes Modul mit der Heatmap-Ansicht).
+  // Eine per URL (?tax=) übergebene Vorauswahl bleibt so beim Wechsel Heatmap→Karte erhalten.
+  const taxParam = router.query.tax;
+  const initialTax = typeof taxParam === 'string' && taxParam !== '' && Number.isFinite(Number(taxParam))
+    ? Number(taxParam) : null;
+  const taxFilter = useTaxonomyFilter(items, initialTax);
+  // Anzahl aktuell (nach Filter) sichtbarer Marker — informativ im Dropdown.
+  const visibleCount = useMemo(
+    () => items.filter(it => taxFilter.matches(it.taxonomyId)).length,
+    [items, taxFilter.matches]
+  );
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
     return items
+      // Die Suche berücksichtigt denselben Taxonomie-Filter wie die Karte, damit
+      // Treffer und sichtbare Marker konsistent bleiben.
+      .filter(it => taxFilter.matches(it.taxonomyId))
       .filter(it => (it.itemName ?? '').toLowerCase().includes(q) || it.locationName.toLowerCase().includes(q))
       .slice(0, 8);
-  }, [search, items]);
+  }, [search, items, taxFilter.matches]);
+
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 3) { setGeoResults([]); return; }
+
+    const timeout = setTimeout(async () => {
+      try {
+        const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+        const url = `https://api.maptiler.com/geocoding/${encodeURIComponent(q)}.json?key=${key}&language=de&limit=5&autocomplete=true`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setGeoResults(data.features ?? []);
+      }
+      catch {
+        setGeoResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [search]);
 
   // Springt zur Position eines Suchtreffers und öffnet dessen Popup.
   const flyToItem = (it: MapItem) => {
     const map = mapInstance.current;
     if (!map) return;
     map.flyTo({ center: [it.longitude, it.latitude], zoom: 14 });
-    new Popup({ closeButton: true, closeOnClick: true, maxWidth: '220px' })
-      .setLngLat([it.longitude, it.latitude])
-      .setHTML(`
-        <div style="padding:10px 12px;font-family:sans-serif;font-size:13px;">
-          <div style="font-weight:600;margin-bottom:4px;">${it.itemName ?? it.locationName}</div>
-          <div style="color:#5f6368;font-size:11px;margin-bottom:8px;">${it.locationName}</div>
-          <a href="/tier/${it.itemId}" style="color:#0078FF;font-size:12px;font-weight:600;">Details ansehen →</a>
-        </div>
-      `)
-      .addTo(map);
+    openItemPopupRef.current?.(it);
     setSearch('');
     setSearchOpen(false);
   };
+
+  const flyToGeoResult = (res: any) => {
+    const map = mapInstance.current;
+    if (!map || !res.center) return;
+
+    const [lng, lat] = res.center;
+    map.flyTo({ center: [lng, lat], zoom: 14 });
+    setSearch('');
+    setSearchOpen(false);
+  }
+
 
   // Ref-Callback: map-click → React-State (kein Re-Render-Problem)
   const openFormRef = useRef<((lng: number, lat: number) => void) | null>(null);
@@ -313,16 +673,14 @@ export default function MapPage() {
     setFormOpen(true);
   };
 
-  // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
-  const addMarkerRef = useRef<((name: string, sex: string, id: number, lng: number, lat: number) => void) | null>(null);
+  // Ref-Callback: öffnet das Marker-Popup (siehe openItemPopup im Karten-Effekt weiter
+  // unten) auch aus Handlern außerhalb dieses Effekts heraus (z.B. flyToItem bei der Suche).
+  const openItemPopupRef = useRef<((item: MapItem) => void) | null>(null);
 
-  // Taxonomien für den Formular-Select
-  useEffect(() => {
-    fetch(`${API}/api/taxonomy`)
-      .then(r => r.ok ? r.json() : [])
-      .then(setTaxonomies)
-      .catch(() => {});
-  }, []);
+  // Ref-Callback: nach erfolgreichem Speichern Marker zur Karte hinzufügen
+  const addMarkerRef = useRef < ((name: string,
+    sex: string, id: number,
+    lng: number, lat: number, locationName: string, taxonomyId: number | null) => void) | null>(null);
 
   // Initialisiert die MapTiler-Karte genau einmal (sobald der Container im DOM
   // ist und die Next.js-Route/-Query bereit ist) und registriert alle
@@ -370,22 +728,72 @@ export default function MapPage() {
       return el;
     };
 
+    // Öffnet bei Klick auf einen Marker ein Popup mit Detail-Link und, falls der
+    // aktuelle Nutzer berechtigt ist (Ersteller oder Admin/Moderator, siehe
+    // GeoMapItemDto.CanDelete), einem Löschen-Button. Ersetzt die frühere direkte
+    // Navigation, damit überhaupt eine Möglichkeit zum Löschen besteht.
+    const openItemPopup = (item: MapItem) => {
+      const popup = new Popup({ closeButton: true, closeOnClick: true, maxWidth: '240px' })
+        .setLngLat([item.longitude, item.latitude])
+        .setHTML(`
+          <div style="padding:10px 12px;font-family:sans-serif;font-size:13px;">
+            <div style="font-weight:600;margin-bottom:4px;">${item.itemName ?? item.locationName}</div>
+            <div style="color:#5f6368;font-size:11px;margin-bottom:10px;">${item.locationName}</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <a href="/tier/${item.itemId}" style="color:#0078FF;font-size:12px;font-weight:600;text-decoration:none;">Details ansehen →</a>
+              ${item.canDelete ? `<button type="button" data-delete-item="${item.itemId}" style="margin-left:auto;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Löschen</button>` : ''}
+            </div>
+          </div>
+        `)
+        .addTo(map);
+
+      if (item.canDelete) {
+        const btn = popup.getElement()?.querySelector<HTMLButtonElement>(`[data-delete-item="${item.itemId}"]`);
+        btn?.addEventListener('click', async () => {
+          if (!confirm(`„${item.itemName ?? `Eintrag #${item.itemId}`}" wirklich löschen?`)) return;
+          btn.disabled = true;
+          btn.textContent = '⏳';
+          try {
+            const res = await fetch(`${API}/api/animals/${item.itemId}`, {
+              method: 'DELETE',
+              headers: userIdRef.current ? { 'X-Clerk-User-Id': userIdRef.current } : {},
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            markersRef.current.get(item.itemId)?.remove();
+            markersRef.current.delete(item.itemId);
+            setItems(prev => prev.filter(it => it.itemId !== item.itemId));
+            popup.remove();
+          } catch {
+            alert('Löschen fehlgeschlagen. Bitte versuche es erneut.');
+            btn.disabled = false;
+            btn.textContent = '🗑 Löschen';
+          }
+        });
+      }
+    };
+    openItemPopupRef.current = openItemPopup;
+
     // Marker nach dem Speichern setzen (via Ref aus React erreichbar)
-    addMarkerRef.current = (name, sex, id, lng, lat) => {
+    addMarkerRef.current = (name, sex, id, lng, lat, locationName, taxonomyId) => {
       const el = createMarkerElement(name, sex === 'Unbekannt' ? undefined : sex);
-      el.addEventListener('click', () => { window.location.href = `/tier/${id}`; });
+      // Selbst angelegte Objekte darf man auch gleich wieder löschen.
+      const newItem: MapItem = { itemId: id, itemName: name, locationName, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex, canDelete: true, taxonomyId: taxonomyId ?? null };
+      // stopPropagation verhindert, dass der Klick zusätzlich den Karten-eigenen
+      // click-Handler auslöst (der sonst das "Tier erfassen"-Formular als
+      // Vollbild-Overlay über dem Popup öffnen würde).
+      el.addEventListener('click', (e) => { e.stopPropagation(); openItemPopup(newItem); });
       const marker = new Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
       markersRef.current.set(id, marker);
       setItems(prev => [
         ...prev,
-        { itemId: id, itemName: name, locationName: name, latitude: lat, longitude: lng, sex: sex === 'Unbekannt' ? null : sex },
+        newItem,
       ]);
     };
 
     // ── Klick auf Karte ──────────────────────────────────────────────────
     // Nicht angemeldete Nutzer erhalten stattdessen einen Hinweis-Popup mit
     // Login-Link; angemeldete Nutzer öffnen über openFormRef das Erfassungs-Panel.
-    map.on('click', (e) => {
+    map.on('click', async (e) => {
       const { lng, lat } = e.lngLat;
 
       if (!isSignedInRef.current) {
@@ -400,6 +808,15 @@ export default function MapPage() {
           `)
           .addTo(map);
         return;
+      }
+
+// reverseGeocode liefert jetzt ein Objekt 
+      try {
+        const result = await reverseGeocode(lng, lat);
+        setFormLocationName(result.locationName);
+      } catch (err) {
+        console.error('Reverse Geocoding fehlgeschlagen:', err);
+        setFormLocationName(`Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
       }
 
       openFormRef.current?.(lng, lat);
@@ -424,7 +841,7 @@ export default function MapPage() {
         for (const item of items) {
           const label = item.itemName ?? item.locationName;
           const el    = createMarkerElement(label, item.sex ?? undefined);
-          el.addEventListener('click', () => { window.location.href = `/tier/${item.itemId}`; });
+          el.addEventListener('click', (e) => { e.stopPropagation(); openItemPopup(item); });
           const marker = new Marker({ element: el }).setLngLat([item.longitude, item.latitude]).addTo(map);
           markersRef.current.set(item.itemId, marker);
         }
@@ -439,14 +856,30 @@ export default function MapPage() {
     };
   }, [router.isReady]);
 
+  // Blendet Marker beim Wechsel des Taxonomie-Filters (oder bei neuen/gelöschten
+  // Items) ein bzw. aus, ohne die Marker neu erzeugen zu müssen: passende Marker
+  // werden zur Karte hinzugefügt, nicht passende entfernt.
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map) return;
+    for (const it of items) {
+      const marker = markersRef.current.get(it.itemId);
+      if (!marker) continue;
+      if (taxFilter.matches(it.taxonomyId)) marker.addTo(map);
+      else marker.remove();
+    }
+  }, [items, taxFilter.matches]);
+
   // Wechselt zur Heatmap-Ansicht und gibt dabei das aktuelle Kartenzentrum/-zoom
   // als Query-Parameter mit, damit die Heatmap an derselben Stelle startet statt
   // wieder beim Standard-Ausschnitt.
   const goToHeatmap = () => {
+    // Aktiven Taxonomie-Filter mitnehmen, damit er auf der Heatmap erhalten bleibt.
+    const tax = taxFilter.selectedId != null ? `&tax=${taxFilter.selectedId}` : '';
     const map = mapInstance.current;
-    if (!map) { router.push('/heatmap'); return; }
+    if (!map) { router.push(`/heatmap${tax ? `?${tax.slice(1)}` : ''}`); return; }
     const c = map.getCenter();
-    router.push(`/heatmap?lng=${c.lng}&lat=${c.lat}&zoom=${map.getZoom()}`);
+    router.push(`/heatmap?lng=${c.lng}&lat=${c.lat}&zoom=${map.getZoom()}${tax}`);
   };
 
   return (
@@ -480,23 +913,63 @@ export default function MapPage() {
 
           {searchOpen && search.trim() !== '' && (
             <div className="map-search-results" onMouseDown={e => e.preventDefault()}>
-              {searchResults.length === 0 ? (
+              {searchResults.length === 0 && geoResults.length === 0 ? (
                 <div className="map-search-empty">Keine Treffer für „{search}“</div>
               ) : (
-                searchResults.map(it => (
-                  <div key={it.itemId} className="map-search-result" onClick={() => flyToItem(it)}>
-                    <span className="map-search-result-icon">
-                      {it.sex === 'Männlich' ? '♂' : it.sex === 'Weiblich' ? '♀' : '◉'}
-                    </span>
-                    <div className="map-search-result-text">
-                      <div className="map-search-result-name">{it.itemName ?? it.locationName}</div>
-                      <div className="map-search-result-loc">{it.locationName}</div>
+                 <>
+                  {searchResults.map(it => (
+                    <div
+                      key={`item-${it.itemId}`}
+                      className="map-search-result"
+                      onClick={() => flyToItem(it)}
+                    >
+                      <span className="map-search-result-icon">
+                        {it.sex === 'Männlich' ? '♂' : it.sex === 'Weiblich' ? '♀' : '◉'}
+                      </span>
+
+                      <div className="map-search-result-text">
+                        <div className="map-search-result-name">
+                          {it.itemName ?? it.locationName}
+                        </div>
+                        <div className="map-search-result-loc">
+                          {it.locationName}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+
+                  {geoResults.map(feature => (
+                    <div
+                      key={`geo-${feature.id}`}
+                      className="map-search-result"
+                      onClick={() => flyToGeoResult(feature)}
+                    >
+                      <span className="map-search-result-icon">⌖</span>
+
+                      <div className="map-search-result-text">
+                        <div className="map-search-result-name">
+                          {feature.text_de ?? feature.text ?? 'Ort'}
+                        </div>
+                        <div className="map-search-result-loc">
+                          {feature.place_name_de ?? feature.place_name ?? ''}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           )}
+        </div>
+
+        {/* Taxonomie-Filter (geteiltes Modul, auch in der Heatmap genutzt) */}
+        <div className="map-taxfilter">
+          <TaxonomyFilterControl
+            options={taxFilter.options}
+            selectedId={taxFilter.selectedId}
+            onChange={taxFilter.setSelectedId}
+            count={visibleCount}
+          />
         </div>
 
         <button className="view-switch-btn" onClick={goToHeatmap} title="Zur Heatmap wechseln">
@@ -506,12 +979,12 @@ export default function MapPage() {
         {/* Panel ist position:fixed → bricht aus overflow:hidden des Elternelements aus */}
         {formOpen && formCoords && (
           <TierFormPanel
-            taxonomies={taxonomies}
             coords={formCoords}
+            locationName={formLocationName}
             userId={userId}
             onClose={() => setFormOpen(false)}
-            onSaved={(name, sex, id) => {
-              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat);
+            onSaved={(name, sex, id, locationName, taxonomyId) => {
+              addMarkerRef.current?.(name, sex, id, formCoords.lng, formCoords.lat, locationName, taxonomyId);
               setFormOpen(false);
             }}
           />
@@ -530,6 +1003,14 @@ export default function MapPage() {
             transition: background .15s, transform .15s;
           }
           .view-switch-btn:hover { background: #fff; transform: translateY(-1px); }
+
+          /* ── Taxonomie-Filter (rechts neben der Suchleiste, damit er die
+                Suche und deren Trefferliste nicht verdeckt) ── */
+          .map-taxfilter {
+            position: absolute; top: 12px; z-index: 500;
+            /* Suche: left 12px + Inhalt min(300px, 100vw-24px) + 30px Padding/Rahmen + 12px Abstand */
+            left: calc(54px + min(300px, calc(100vw - 24px)));
+          }
 
           /* ── Karten-Suche ── */
           .map-search-wrap {
@@ -636,6 +1117,79 @@ export default function MapPage() {
           .tp-unit-wrap      { position: relative; display: flex; align-items: center; }
           .tp-unit-input     { padding-right: 30px !important; }
           .tp-unit           { position: absolute; right: 10px; font-size: 11px; color: #9aa0a6; font-weight: 500; pointer-events: none; }
+
+          .tp-gbif-search-row { display: flex; gap: 8px; }
+          .tp-gbif-search-row .tp-input { flex: 1; }
+          .tp-gbif-hint { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+
+          .tp-no-collection {
+            font-size: 12px; color: #92400e; background: #fffbeb;
+            border: 1px solid #fde68a; border-radius: 8px; padding: 10px 12px;
+            display: flex; flex-direction: column; gap: 8px;
+          }
+          .tp-no-collection-link {
+            align-self: flex-start; font-size: 12px; font-weight: 600;
+            color: #0078FF; text-decoration: none;
+          }
+          .tp-no-collection-link:hover { text-decoration: underline; }
+
+          .tp-btn-gbif-search {
+            white-space: nowrap; padding: 8px 14px; background: #eff6ff;
+            border: 1px solid #bfdbfe; border-radius: 6px;
+            font-size: 12px; font-weight: 600; color: #1d4ed8;
+            cursor: pointer; font-family: inherit; transition: all .15s;
+          }
+          .tp-btn-gbif-search:hover:not(:disabled) { background: #dbeafe; }
+          .tp-btn-gbif-search:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-gbif-preview {
+            background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 10px;
+            padding: 14px; margin-bottom: 14px;
+          }
+          .tp-gbif-preview--warn { background: #fffbeb; border-color: #fde68a; }
+          .tp-gbif-preview-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 10px; }
+
+          .tp-gbif-chain {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 4px; margin-bottom: 12px;
+          }
+          .tp-gbif-chain-item {
+            display: flex; flex-direction: column; align-items: center;
+            background: #fff; border: 1px solid #d1fae5; border-radius: 6px;
+            padding: 4px 8px; min-width: 56px;
+          }
+          .tp-gbif-rank  { font-size: 9px; color: #9ca3af; text-transform: capitalize; }
+          .tp-gbif-val   { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+          .tp-gbif-arrow { font-size: 14px; color: #9ca3af; line-height: 1; }
+
+          .tp-btn-gbif-accept {
+            padding: 7px 16px; background: #0078FF; color: #fff; border: none;
+            border-radius: 7px; font-size: 12px; font-weight: 600;
+            cursor: pointer; font-family: inherit; transition: background .15s;
+          }
+          .tp-btn-gbif-accept:hover:not(:disabled) { background: #0060cc; }
+          .tp-btn-gbif-accept:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-btn-gbif-suggestion {
+            display: block; width: 100%; text-align: left; margin-bottom: 6px;
+            padding: 8px 12px; background: #fff; border: 1px solid #fde68a;
+            border-radius: 8px; font-size: 12px; cursor: pointer;
+            font-family: inherit; transition: all .15s;
+          }
+          .tp-btn-gbif-suggestion:hover:not(:disabled) { background: #fffbeb; border-color: #f59e0b; }
+          .tp-btn-gbif-suggestion:disabled { opacity: .5; cursor: not-allowed; }
+
+          .tp-gbif-confirmed {
+            display: flex; align-items: center; gap: 8px; justify-content: space-between;
+            background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 8px;
+            padding: 10px 14px; margin-bottom: 14px;
+            font-size: 13px; color: #065f46; font-weight: 500;
+          }
+          .tp-gbif-confirmed button {
+            background: none; border: none; cursor: pointer;
+            font-size: 14px; color: #9ca3af; padding: 0 4px; line-height: 1;
+          }
+          .tp-gbif-confirmed button:hover { color: #374151; }
 
           .tp-radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
           .tp-radio {

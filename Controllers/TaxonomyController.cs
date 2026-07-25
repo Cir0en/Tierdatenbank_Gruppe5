@@ -20,11 +20,14 @@ namespace TodoApi.Controllers
     {
         private readonly NeondbContext _context;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly TodoApi.Services.ClerkUserProvisioningService _userProvisioning;
 
-        public TaxonomyController(NeondbContext context, IHttpClientFactory httpClientFactory)
+        public TaxonomyController(NeondbContext context, IHttpClientFactory httpClientFactory,
+                                   TodoApi.Services.ClerkUserProvisioningService userProvisioning)
         {
             _context = context;
             _httpClientFactory = httpClientFactory;
+            _userProvisioning = userProvisioning;
         }
 
         // Prüft, ob GBIF für ein Taxon alle benötigten Rangstufen zwischen Stamm und Art geliefert hat.
@@ -37,6 +40,47 @@ namespace TodoApi.Controllers
                 && !string.IsNullOrWhiteSpace(gbif.Family)
                 && !string.IsNullOrWhiteSpace(gbif.Genus)
                 && !string.IsNullOrWhiteSpace(gbif.Species ?? gbif.CanonicalName ?? gbif.ScientificName);
+        }
+
+        // Sucht in der lokalen Datenbank nach einer bereits freigegebenen Art mit exakt diesem
+        // Namen (unabhängig von Groß-/Kleinschreibung). Manuell eingereichte und genehmigte
+        // Taxonomien sind nie bei GBIF registriert, daher muss die lokale Datenbank zusätzlich
+        // zur externen GBIF-Suche durchsucht werden — sonst sind solche Arten über die
+        // GBIF-Suche nie wieder auffindbar.
+        private async Task<Taxonomy?> FindLocalArtExactAsync(string speciesName)
+        {
+            var normalized = speciesName.Trim().ToLower();
+            return await _context.Taxonomies
+                .FirstOrDefaultAsync(t => t.Rank == "Art" && t.IsApproved == true
+                    && t.Name.ToLower() == normalized);
+        }
+
+        // Sucht bis zu "limit" freigegebene lokale Arten, deren Name den Suchbegriff enthält
+        // (für die Vorschlagsliste, wenn kein eindeutiger Treffer vorliegt).
+        private async Task<List<Taxonomy>> FindLocalArtSuggestionsAsync(string speciesName, int limit)
+        {
+            var normalized = speciesName.Trim().ToLower();
+            return await _context.Taxonomies
+                .Where(t => t.Rank == "Art" && t.IsApproved == true && t.Name.ToLower().Contains(normalized))
+                .Take(limit)
+                .ToListAsync();
+        }
+
+        // Baut aus einem lokalen Taxonomie-Blattknoten (Art) die vollständige Rangkette
+        // (Stamm...Art) durch Verfolgen der ParentId-Kette nach oben auf — Pendant zu den
+        // von GBIF gelieferten Rang-Feldern.
+        private async Task<Dictionary<string, string>> BuildLocalRankChainAsync(Taxonomy leaf)
+        {
+            var result = new Dictionary<string, string>();
+            Taxonomy? current = leaf;
+            while (current != null)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Rank))
+                    result[current.Rank!] = current.Name;
+                if (current.ParentId == null) break;
+                current = await _context.Taxonomies.FindAsync(current.ParentId.Value);
+            }
+            return result;
         }
 
         // Legt (bzw. findet) die komplette Taxonomie-Kette für ein von GBIF geliefertes Taxon an,
@@ -152,11 +196,22 @@ namespace TodoApi.Controllers
             return Ok(taxonomy);
         }
 
-        // POST /api/taxonomy — legt einen einzelnen Taxonomie-Eintrag direkt an (z.B. für Admin-Tools);
-        // wird zunächst als nicht genehmigt (IsApproved = false) angelegt
+        // POST /api/taxonomy — legt einen einzelnen Taxonomie-Eintrag direkt an (z.B. für Admin-Tools),
+        // ohne den regulären Freigabe-Workflow (submissions/GBIF) zu durchlaufen; wird zunächst als
+        // nicht genehmigt (IsApproved = false) angelegt. Nur Admin/Moderator dürfen das, da hiermit
+        // die Moderationsprüfung umgangen wird.
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<object>> CreateTaxonomy(CreateTaxonomyDto dto)
         {
+            var clerkId = User.FindFirst("sub")?.Value;
+            var currentUser = string.IsNullOrWhiteSpace(clerkId)
+                ? null
+                : await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+
+            if (currentUser == null || (currentUser.Role != "Admin" && currentUser.Role != "Moderator"))
+                return Forbid();
+
             if (string.IsNullOrWhiteSpace(dto.Name))
                 return BadRequest("Name ist erforderlich.");
 
@@ -198,9 +253,38 @@ namespace TodoApi.Controllers
             if (string.IsNullOrWhiteSpace(dto.SpeciesName))
                 return BadRequest("Artname ist erforderlich.");
 
-            var client = _httpClientFactory.CreateClient("Gbif");
-
             var speciesName = dto.SpeciesName.Trim();
+
+            // Manuell eingereichte und freigegebene Taxonomien sind nie bei GBIF registriert —
+            // zuerst die lokale Datenbank auf einen exakten Treffer prüfen, bevor die externe
+            // GBIF-API gefragt wird. Ist ein solcher Eintrag vorhanden, kann er direkt (ohne
+            // GBIF-Bestätigungsschritt) übernommen werden.
+            var localExact = await FindLocalArtExactAsync(speciesName);
+            if (localExact != null)
+            {
+                var localChain = await BuildLocalRankChainAsync(localExact);
+                return Ok(new
+                {
+                    status = "match_found",
+                    source = "local",
+                    taxonomyId = localExact.Id,
+                    input = speciesName,
+                    scientificName = localExact.Name,
+                    canonicalName = localExact.Name,
+                    taxonomy = new
+                    {
+                        reich = "Animalia",
+                        stamm = localChain.GetValueOrDefault("Stamm"),
+                        klasse = localChain.GetValueOrDefault("Klasse"),
+                        ordnung = localChain.GetValueOrDefault("Ordnung"),
+                        familie = localChain.GetValueOrDefault("Familie"),
+                        gattung = localChain.GetValueOrDefault("Gattung"),
+                        art = localChain.GetValueOrDefault("Art")
+                    }
+                });
+            }
+
+            var client = _httpClientFactory.CreateClient("Gbif");
 
             var matchUrl =
                 $"species/match?name={Uri.EscapeDataString(speciesName)}&kingdom=Animalia&rank=SPECIES&verbose=true";
@@ -223,6 +307,7 @@ namespace TodoApi.Controllers
                 return Ok(new
                 {
                     status = "match_found",
+                    source = "gbif",
                     UsageKey = gbif!.UsageKey,
                     input = speciesName,
                     confidence = gbif.Confidence,
@@ -242,21 +327,29 @@ namespace TodoApi.Controllers
                 });
             }
 
+            // limit höher als die tatsächlich gewünschten 5 Vorschläge ansetzen, da danach noch
+            // nach Animalia + vollständiger Rangkette gefiltert wird (siehe unten) und GBIF unter
+            // demselben Suchbegriff auch viele Nicht-Tier-Treffer liefert (z.B. die Pflanzengattung
+            // "Fuchsia" bei der Suche nach "Fuchs").
             var suggestUrl =
-                $"species/suggest?q={Uri.EscapeDataString(speciesName)}&rank=SPECIES&limit=5";
+                $"species/suggest?q={Uri.EscapeDataString(speciesName)}&rank=SPECIES&limit=20";
 
-            var suggestions = await client.GetFromJsonAsync<List<GbifSpeciesDto>>(suggestUrl)
+            var rawSuggestions = await client.GetFromJsonAsync<List<GbifSpeciesDto>>(suggestUrl)
                 ?? new List<GbifSpeciesDto>();
 
-            return Ok(new
-            {
-                status = "needs_confirmation",
-                message = "Keine sichere GBIF-Übereinstimmung gefunden.",
-                input = speciesName,
-                gbifMatch = gbif,
-                suggestions = suggestions.Select(s => new
+            // Nur Vorschläge anzeigen, die bei einer Bestätigung (POST .../gbif/confirm) auch
+            // tatsächlich akzeptiert würden — Animalia-Reich und vollständige Rangkette (siehe
+            // HasCompleteAnimalTaxonomy). Sonst könnte der Nutzer einen Vorschlag anklicken, der
+            // serverseitig doch abgelehnt wird (Non-Animalia-Namensgleichheit oder bei GBIF
+            // unvollständige Klassifikation, z.B. fehlende Ordnung).
+            var gbifSuggestions = rawSuggestions
+                .Where(s => string.Equals(s.Kingdom, "Animalia", StringComparison.OrdinalIgnoreCase)
+                            && HasCompleteAnimalTaxonomy(s))
+                .Select(s => new
                 {
-                    usageKey = s.Key ?? s.UsageKey,
+                    source = "gbif",
+                    usageKey = (int?)(s.Key ?? s.UsageKey),
+                    taxonomyId = (int?)null,
                     s.ScientificName,
                     s.CanonicalName,
                     s.Rank,
@@ -269,6 +362,51 @@ namespace TodoApi.Controllers
                     s.Genus,
                     s.Species
                 })
+                .ToList();
+
+            // Zusätzlich lokale (manuell eingereichte, bereits freigegebene) Arten vorschlagen,
+            // deren Name den Suchbegriff enthält — sonst bleiben lokal gespeicherte, aber bei
+            // GBIF unbekannte Taxonomien über diese Suche unauffindbar.
+            var localMatches = await FindLocalArtSuggestionsAsync(speciesName, 5);
+            var localSuggestions = new List<object>();
+            foreach (var loc in localMatches)
+            {
+                var chain = await BuildLocalRankChainAsync(loc);
+                localSuggestions.Add(new
+                {
+                    source = "local",
+                    usageKey = (int?)null,
+                    taxonomyId = (int?)loc.Id,
+                    ScientificName = loc.Name,
+                    CanonicalName = loc.Name,
+                    Rank = loc.Rank,
+                    Status = (string?)null,
+                    Kingdom = "Animalia",
+                    Phylum = chain.GetValueOrDefault("Stamm"),
+                    className = chain.GetValueOrDefault("Klasse"),
+                    Order = chain.GetValueOrDefault("Ordnung"),
+                    Family = chain.GetValueOrDefault("Familie"),
+                    Genus = chain.GetValueOrDefault("Gattung"),
+                    Species = chain.GetValueOrDefault("Art")
+                });
+            }
+
+            // Lokale Treffer zuerst, da sie bereits innerhalb der App geprüft/freigegeben wurden.
+            var suggestions = localSuggestions
+                .Concat(gbifSuggestions.Cast<object>())
+                .Take(5)
+                .ToList();
+
+            return Ok(new
+            {
+                status = "needs_confirmation",
+                message = suggestions.Count > 0
+                    ? "Keine sichere GBIF-Übereinstimmung gefunden."
+                    : "Keine passende Tier-Art bei GBIF gefunden. GBIF durchsucht primär wissenschaftliche " +
+                      "(lateinische) Namen — versuche es damit, oder reiche die Art manuell ein.",
+                input = speciesName,
+                gbifMatch = gbif,
+                suggestions
             });
         }
 
@@ -294,7 +432,23 @@ namespace TodoApi.Controllers
             if (!string.Equals(gbif.Rank, "SPECIES", StringComparison.OrdinalIgnoreCase))
                 return BadRequest("Das ausgewählte Taxon ist keine Art.");
 
-            var species = await CreateChainFromGbifAsync(gbif);
+            // GBIF liefert nicht für jedes Taxon eine vollständige Rangkette (z.B. fehlende
+            // Ordnung) — in dem Fall lässt sich die Kette nicht automatisch aufbauen. Statt das
+            // als unbehandelten 500 durchschlagen zu lassen, sauber ablehnen und auf den manuellen
+            // Einreichungs-Workflow (POST /api/taxonomy/submissions) verweisen.
+            Taxonomy species;
+            try
+            {
+                species = await CreateChainFromGbifAsync(gbif);
+            }
+            catch (InvalidOperationException)
+            {
+                return BadRequest(new
+                {
+                    message = "GBIF liefert für dieses Taxon keine vollständige Klassifikation (z.B. fehlende Ordnung) " +
+                               "und kann daher nicht automatisch übernommen werden. Bitte die Art stattdessen manuell einreichen."
+                });
+            }
 
             return Ok(new
             {
@@ -328,6 +482,13 @@ namespace TodoApi.Controllers
             if (!string.IsNullOrWhiteSpace(clerkId))
             {
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+
+                // Normalerweise legt der Clerk-Webhook den Nutzer bei der Registrierung an; ist der
+                // Webhook nicht erreichbar (z.B. lokale Entwicklung ohne gültigen Tunnel), fehlt der
+                // Nutzer hier sonst dauerhaft und die Einreichung bliebe ohne CreatedBy. Fallback:
+                // direkt bei Clerk nachschlagen und lokal anlegen (siehe ClerkUserProvisioningService).
+                user ??= await _userProvisioning.ProvisionFromClerkAsync(clerkId);
+
                 createdBy = user?.Id;
             }
 
@@ -410,7 +571,11 @@ namespace TodoApi.Controllers
                     s.Art,
                     s.Source,
                     s.Status,
-                    s.CreatedAt
+                    s.CreatedAt,
+                    CreatedByUsername = _context.Users
+                        .Where(u => u.Id == s.CreatedBy)
+                        .Select(u => u.Username)
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 

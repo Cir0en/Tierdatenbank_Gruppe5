@@ -26,6 +26,7 @@ function resolveImageUrl(imageUrl: string): string {
 interface AnimalDetail {
   id: number;
   collectionId: number | null;
+  taxonomyId: number | null;
   name: string | null;
   findDate: string | null;
   description: string | null;
@@ -34,12 +35,41 @@ interface AnimalDetail {
   status: string | null;
   sex: string | null;
   ageClass: string | null;
+  lebensraum: string | null;
   bodyMassGram: number | null;
   bodyLengthMm: number | null;
-  taxonomy: { name: string; rank: string | null } | null;
+  taxonomy: { id: number; name: string; rank: string | null } | null;
   collection: { id: number; name: string } | null;
-  findingLocation: { name: string; latitude: number; longitude: number } | null;
+  findingLocation: { id: number; name: string; latitude: number; longitude: number } | null;
+  canEdit: boolean;
 }
+
+// GBIF-Taxonomie-Abgleich (siehe Sammlung.tsx/karte.tsx): entweder ein eindeutiger Treffer
+// (match_found) oder eine Liste von Vorschlägen, die der Nutzer manuell bestätigen muss.
+interface GbifTaxonomy {
+  reich: string; stamm: string; klasse: string;
+  ordnung: string; familie: string; gattung: string; art: string;
+}
+interface GbifMatchResult {
+  status: 'match_found';
+  usageKey: number;
+  confidence: number;
+  canonicalName: string;
+  taxonomy: GbifTaxonomy;
+}
+interface GbifSuggestion {
+  usageKey?: number;
+  scientificName?: string;
+  canonicalName?: string;
+  rank?: string;
+}
+interface GbifNeedsConfirmation {
+  status: 'needs_confirmation';
+  suggestions: GbifSuggestion[];
+}
+type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
+
+const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
 
 interface AnimalImage {
   id: number;
@@ -75,6 +105,452 @@ function formatDate(d: string | null): string | null {
   }
 }
 
+// Formatiert Breiten-/Längengrad als lesbare Dezimalgrad-Angabe (z. B. für Fundorte
+// ohne Adresse/Straßen wie Wälder, wo der reine Ortsname wenig aussagekräftig ist).
+function formatCoords(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+interface ReverseGeocodeResult {
+  locationName: string;
+  distanceMeters: number | null;
+  isPrecise: boolean;
+}
+
+function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const earthRadius = 6371000;
+  const toRad = (v: number) => v * Math.PI / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) *
+    Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function reverseGeocode(lng: number, lat: number): Promise<ReverseGeocodeResult> {
+  const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const roundedLng = lng.toFixed(6);
+  const roundedLat = lat.toFixed(6);
+  const url =
+    `https://api.maptiler.com/geocoding/${roundedLng},${roundedLat}.json` +
+    `?key=${key}&language=de`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('MapTiler Reverse Geocoding Fehler:', res.status, errorText);
+    throw new Error('Adresse konnte nicht ermittelt werden');
+  }
+
+  const data = await res.json();
+  const features = data.features ?? [];
+
+  if (features.length === 0) {
+    return {
+      locationName: `Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      distanceMeters: null,
+      isPrecise: false,
+    };
+  }
+
+  const best = features[0];
+  const [foundLng, foundLat] = best.center ?? [lng, lat];
+  const distance = distanceMeters(lng, lat, foundLng, foundLat);
+
+  const placeName =
+    best.place_name_de ??
+    best.place_name ??
+    best.text_de ??
+    best.text ??
+    'unbekannter Ort';
+
+  if (distance <= 100) {
+    return { locationName: placeName, distanceMeters: distance, isPrecise: true };
+  }
+
+  if (distance <= 500) {
+    return { locationName: `In der Nähe von ${placeName}`, distanceMeters: distance, isPrecise: false };
+  }
+
+  const shortPlace = best.text_de ?? best.text ?? placeName;
+  return {
+    locationName: `Naturstandort bei ${shortPlace} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+    distanceMeters: distance,
+    isPrecise: false,
+  };
+}
+
+// ── Bearbeitungs-Formular ────────────────────────────────────────────────────
+//
+// Formular zum Bearbeiten eines bestehenden Tier-Eintrags (Stammdaten + Taxonomie +
+// optionale Koordinaten), analog zu AddAnimalModal (Sammlung.tsx) / TierFormPanel
+// (karte.tsx), aber mit Werten aus dem geladenen Tier vorbefüllt und PUT statt POST.
+function EditAnimalForm({ animal, clerkUserId, onCancel, onSaved }: {
+  animal: AnimalDetail;
+  clerkUserId: string | null;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [displayName, setDisplayName] = useState(animal.name ?? '');
+  const [name, setName]             = useState('');
+  const [description, setDesc]      = useState(animal.description ?? '');
+  const [findDate, setFindDate]     = useState(animal.findDate ?? '');
+  const [sex, setSex]               = useState(animal.sex ?? 'Unbekannt');
+  const [ageClass, setAgeClass]     = useState(animal.ageClass ?? '');
+  const [bodyMass, setBodyMass]     = useState(animal.bodyMassGram != null ? String(animal.bodyMassGram) : '');
+  const [bodyLen, setBodyLen]       = useState(animal.bodyLengthMm != null ? String(animal.bodyLengthMm) : '');
+  const [taxonomyId, setTaxonomyId] = useState<number | null>(animal.taxonomyId);
+  const [lebensraum, setLebensraum] = useState(animal.lebensraum ?? '');
+  const [seltenheit, setSeltenheit] = useState(animal.status ?? '');
+  const [storageInfo, setStorageInfo] = useState(animal.storageInfo ?? '');
+  const [showCoords, setShowCoords] = useState(animal.findingLocation != null);
+  const [latitude, setLatitude]     = useState(animal.findingLocation ? String(animal.findingLocation.latitude) : '');
+  const [longitude, setLongitude]   = useState(animal.findingLocation ? String(animal.findingLocation.longitude) : '');
+  const [locationName, setLocationName] = useState(animal.findingLocation?.name ?? '');
+  const [locationNameTouched, setLocationNameTouched] = useState(false);
+  const [locationLookupLoading, setLocationLookupLoading] = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+
+  const [gbifResult, setGbifResult]       = useState<GbifResult | null>(null);
+  const [gbifLoading, setGbifLoading]     = useState(false);
+  const [gbifError, setGbifError]         = useState<string | null>(null);
+  const [confirmedName, setConfirmedName] = useState<string | null>(animal.taxonomy?.name ?? null);
+  const [confirming, setConfirming]       = useState(false);
+
+  // Setzt den kompletten GBIF-Zustand zurück (z. B. wenn der Artname geändert wird und
+  // ein vorheriger Treffer/Vorschlag oder die bereits zugeordnete Taxonomie damit ungültig wird).
+  const resetGbif = () => {
+    setGbifResult(null);
+    setConfirmedName(null);
+    setTaxonomyId(null);
+    setGbifError(null);
+  };
+
+  const handleGbifSearch = async () => {
+    if (!name.trim()) return;
+    setGbifLoading(true);
+    resetGbif();
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif?speciesName=${encodeURIComponent(name.trim())}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGbifResult(await res.json());
+    } catch (e: any) {
+      setGbifError('GBIF-Suche fehlgeschlagen: ' + e.message);
+    } finally {
+      setGbifLoading(false);
+    }
+  };
+
+  const handleGbifConfirm = async (usageKey: number, displayName: string) => {
+    setConfirming(true);
+    setGbifError(null);
+    try {
+      const res = await fetch(`${API}/api/taxonomy/gbif/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageKey }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTaxonomyId(data.taxonomyId);
+      setConfirmedName(displayName);
+      setGbifResult(null);
+    } catch (e: any) {
+      setGbifError('Bestätigung fehlgeschlagen: ' + e.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showCoords || locationNameTouched) return;
+
+    const lat = latitude.trim() ? parseFloat(latitude) : null;
+    const lng = longitude.trim() ? parseFloat(longitude) : null;
+    if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setLocationLookupLoading(true);
+      try {
+        const result = await reverseGeocode(lng, lat);
+        if (!cancelled) setLocationName(result.locationName);
+      } catch (err) {
+        console.error('Reverse Geocoding fehlgeschlagen:', err);
+        if (!cancelled) setLocationName(`Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+      } finally {
+        if (!cancelled) setLocationLookupLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [showCoords, latitude, longitude, locationNameTouched]);
+
+  const handleSave = async () => {
+    if (!displayName.trim()) { setError('Bitte einen Namen eingeben.'); return; }
+
+    const lat = showCoords && latitude.trim()  ? parseFloat(latitude)  : null;
+    const lng = showCoords && longitude.trim() ? parseFloat(longitude) : null;
+    if (showCoords && ((lat === null) !== (lng === null))) {
+      setError('Bitte Breiten- und Längengrad zusammen eingeben (oder beide leer lassen).');
+      return;
+    }
+    if (lat !== null && (isNaN(lat) || lat < -90 || lat > 90)) {
+      setError('Breitengrad muss zwischen -90 und 90 liegen.');
+      return;
+    }
+    if (lng !== null && (isNaN(lng) || lng < -180 || lng > 180)) {
+      setError('Längengrad muss zwischen -180 und 180 liegen.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/api/animals/${animal.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {}),
+        },
+        body: JSON.stringify({
+          name:         displayName.trim(),
+          description:  description.trim() || null,
+          findDate:     findDate || null,
+          sex:          sex === 'Unbekannt' ? null : sex,
+          ageClass:     ageClass || null,
+          bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
+          bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
+          taxonomyId:   taxonomyId,
+          lebensraum:   lebensraum.trim() || null,
+          status:       seltenheit || null,
+          storageInfo:  storageInfo.trim() || null,
+          latitude:     lat,
+          longitude:    lng,
+          locationName:  showCoords ? (locationName.trim() || null) : null,
+        }),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  const matchResult  = gbifResult?.status === 'match_found'        ? gbifResult as GbifMatchResult       : null;
+  const needsConfirm = gbifResult?.status === 'needs_confirmation'  ? gbifResult as GbifNeedsConfirmation : null;
+
+  return (
+    <div>
+      {error && <div className="modal-error">{error}</div>}
+
+      <div className="form-group">
+        <label className="form-label">Name <span className="required">*</span></label>
+        <input type="text" className="form-input" autoFocus
+          value={displayName} onChange={e => setDisplayName(e.target.value)} />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Fundort</label>
+        <input type="text" className="form-input"
+          placeholder="z. B. Buchenwald oberhalb der Siegquelle"
+          value={locationName}
+          onChange={e => { setLocationName(e.target.value); setLocationNameTouched(true); }} />
+        <div className="gbif-hint">
+          {locationLookupLoading
+            ? 'Fundort wird aus den Koordinaten ermittelt...'
+            : 'Wird bei Koordinaten automatisch vorgeschlagen und kann angepasst werden.'}
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Artname (Taxonomie-Suche)</label>
+        <div className="gbif-search-row">
+          <input type="text" className="form-input"
+            placeholder="z. B. Parnassius apollo"
+            value={name}
+            onChange={e => { setName(e.target.value); resetGbif(); }}
+            onKeyDown={e => { if (e.key === 'Enter') handleGbifSearch(); }} />
+          <button type="button" className="btn-gbif-search"
+            onClick={handleGbifSearch}
+            disabled={!name.trim() || gbifLoading || saving}>
+            {gbifLoading ? '⏳' : '🔍 Suchen'}
+          </button>
+        </div>
+        <div className="gbif-hint">Wissenschaftlichen Artnamen eingeben und Suchen klicken, um die Taxonomie neu zuzuordnen.</div>
+      </div>
+
+      {gbifError && <div className="modal-error">{gbifError}</div>}
+
+      {confirmedName && (
+        <div className="gbif-confirmed">
+          <span>✓ Taxonomie: <em>{confirmedName}</em></span>
+          <button type="button" onClick={resetGbif} title="Zurücksetzen">✕</button>
+        </div>
+      )}
+
+      {matchResult && (
+        <div className="gbif-preview">
+          <div className="gbif-preview-title">
+            GBIF-Treffer — {matchResult.confidence}% Übereinstimmung
+          </div>
+          <div className="gbif-chain">
+            {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
+              <span key={rank} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span className="gbif-chain-item">
+                  <span className="gbif-rank">{rank}</span>
+                  <span className="gbif-val">{val}</span>
+                </span>
+                {i < arr.length - 1 && <span className="gbif-arrow">›</span>}
+              </span>
+            ))}
+          </div>
+          <button type="button" className="btn-gbif-accept" disabled={confirming}
+            onClick={() => handleGbifConfirm(matchResult.usageKey, matchResult.canonicalName)}>
+            {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
+          </button>
+        </div>
+      )}
+
+      {needsConfirm && (
+        <div className="gbif-preview gbif-preview--warn">
+          <div className="gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
+          {needsConfirm.suggestions.filter(s => s.usageKey).length > 0 ? (
+            <>
+              <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
+              {needsConfirm.suggestions.filter(s => s.usageKey).map((s, i) => (
+                <button key={i} type="button" className="btn-gbif-suggestion" disabled={confirming}
+                  onClick={() => handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                  <em>{s.canonicalName ?? s.scientificName}</em>
+                  {s.rank && <span className="gbif-rank"> [{s.rank}]</span>}
+                </button>
+              ))}
+            </>
+          ) : (
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+          )}
+        </div>
+      )}
+
+      <div className="form-group">
+        <label className="form-label">Beschreibung</label>
+        <textarea className="form-textarea" placeholder="Kurze Beschreibung…"
+          value={description} onChange={e => setDesc(e.target.value)} />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Seltenheit</label>
+        <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+          <option value="">— nicht angegeben —</option>
+          {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      <div className="form-row-2">
+        <div className="form-group">
+          <label className="form-label">Lebensraum</label>
+          <input type="text" className="form-input"
+            placeholder="z. B. Alpine Wiesen, Berghänge"
+            value={lebensraum} onChange={e => setLebensraum(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Funddatum</label>
+          <input type="date" className="form-input"
+            value={findDate} onChange={e => setFindDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Lagerung</label>
+        <input type="text" className="form-input"
+          placeholder="z. B. Vitrine 3, Schrank B"
+          value={storageInfo} onChange={e => setStorageInfo(e.target.value)} />
+      </div>
+
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input type="checkbox" checked={showCoords}
+            onChange={e => setShowCoords(e.target.checked)} />
+          Koordinaten manuell eingeben (statt über die Kartenansicht)
+        </label>
+        {showCoords && (
+          <div className="form-row-2" style={{ marginTop: 10 }}>
+            <div className="form-group">
+              <label className="form-label">Breitengrad</label>
+              <input type="number" step="any" min="-90" max="90" className="form-input"
+                placeholder="z. B. 50.9411"
+                value={latitude} onChange={e => setLatitude(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Längengrad</label>
+              <input type="number" step="any" min="-180" max="180" className="form-input"
+                placeholder="z. B. 8.0020"
+                value={longitude} onChange={e => setLongitude(e.target.value)} />
+            </div>
+          </div>
+        )}
+        <div className="gbif-hint">Wird ein Fundort mit Koordinaten angegeben, erscheint das Tier auf der Kartenansicht.</div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Geschlecht</label>
+        <div className="radio-group">
+          {(['Männlich', 'Weiblich', 'Unbekannt'] as const).map(g => (
+            <label key={g} className={`radio-label${sex === g ? ' radio-checked' : ''}`}>
+              <input type="radio" name="sex-edit" value={g}
+                checked={sex === g} onChange={() => setSex(g)} style={{ display: 'none' }} />
+              {g === 'Männlich' ? '♂ Männlich' : g === 'Weiblich' ? '♀ Weiblich' : '◉ Unbekannt'}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-row-2">
+        <div className="form-group">
+          <label className="form-label">Altersklasse</label>
+          <select className="form-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
+            <option value="">— nicht angegeben —</option>
+            <option value="Juvenil">Juvenil</option>
+            <option value="Subadult">Subadult</option>
+            <option value="Adult">Adult</option>
+            <option value="Senior">Senior</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Körpermasse (g)</label>
+          <input type="number" min="0" step="0.01" className="form-input"
+            placeholder="0.00" value={bodyMass} onChange={e => setBodyMass(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Körperlänge (mm)</label>
+          <input type="number" min="0" step="0.1" className="form-input"
+            placeholder="0.0" value={bodyLen} onChange={e => setBodyLen(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="modal-actions">
+        <button className="btn-cancel" disabled={saving} onClick={onCancel}>Abbrechen</button>
+        <button className="btn-save"   disabled={saving} onClick={handleSave}>
+          {saving ? '⏳ Wird gespeichert…' : '💾 Speichern'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function TierDetailPage() {
   const router = useRouter();
   const { userId } = useAuth();
@@ -88,18 +564,32 @@ export default function TierDetailPage() {
   const [error, setError]           = useState<string | null>(null);
   const [imgError, setImgError]     = useState<string | null>(null);
   const [uploading, setUploading]   = useState(false);
+  const [editing, setEditing]       = useState(false);
 
-  // Lädt die Stammdaten des Tieres, sobald die Routen-ID verfügbar ist
-  // (z.B. erst nach der Client-seitigen Hydration von router.query gültig)
-  useEffect(() => {
+  // Lädt die Stammdaten des Tieres. Sendet die Clerk-User-Id mit, damit das Backend
+  // canEdit/canDelete korrekt für den anfragenden Nutzer berechnen kann. Als useCallback
+  // definiert, damit EditAnimalForm nach dem Speichern dieselbe Funktion erneut aufrufen
+  // kann, um die aktualisierten Daten nachzuladen.
+  const loadAnimal = useCallback(async () => {
     if (!animalId) return;
     setLoading(true);
     setError(null);
-    fetch(`${API}/api/animals/${animalId}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((data: AnimalDetail) => { setAnimal(data); setLoading(false); })
-      .catch((err: Error) => { setError(err.message); setLoading(false); });
-  }, [animalId]);
+    try {
+      const res = await fetch(`${API}/api/animals/${animalId}`, {
+        headers: userId ? { 'X-Clerk-User-Id': userId } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setAnimal(await res.json());
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [animalId, userId]);
+
+  // Lädt die Stammdaten des Tieres, sobald die Routen-ID verfügbar ist
+  // (z.B. erst nach der Client-seitigen Hydration von router.query gültig)
+  useEffect(() => { loadAnimal(); }, [loadAnimal]);
 
   // Lädt das (erste) zugehörige Foto des Tieres. Als useCallback definiert, damit
   // die Funktion sowohl im Lade-Effekt unten als auch nach Upload/Löschen erneut
@@ -188,6 +678,14 @@ export default function TierDetailPage() {
           border: none;
         }
         .back-btn:hover { background: #dcfce7; }
+
+        .edit-btn {
+          display: inline-flex; align-items: center; gap: 6px;
+          background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px;
+          padding: 8px 14px; font-size: 13px; font-weight: 500; color: #1d4ed8;
+          cursor: pointer; font-family: inherit; transition: background .15s; margin-bottom: 28px;
+        }
+        .edit-btn:hover { background: #dbeafe; }
 
         .detail-grid {
           display: grid;
@@ -280,13 +778,133 @@ export default function TierDetailPage() {
           padding: 32px; border: 1px dashed #fca5a5; border-radius: 12px;
           background: #fff5f5; color: #b91c1c; font-size: 14px; text-align: center;
         }
+
+        /* ── Bearbeiten-Formular ── */
+        .modal-error { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; }
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 11px; font-weight: 600; color: #5f6368; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+        .required { color: #ea4335; }
+        .form-input, .form-textarea { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 13px; color: #202124; font-family: inherit; outline: none; transition: border-color .2s, box-shadow .2s; }
+        .form-input:focus, .form-textarea:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+        .form-textarea { resize: vertical; min-height: 72px; }
+
+        .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 0; }
+        .form-row-2 .form-group { margin-bottom: 16px; }
+        .form-select {
+          width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #e5e7eb;
+          font-size: 13px; color: #202124; font-family: inherit; outline: none;
+          background: #fff; cursor: pointer; transition: border-color .2s, box-shadow .2s;
+        }
+        .form-select:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
+
+        .checkbox-label {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 13px; color: #374151; cursor: pointer; user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2d6a4f; }
+
+        .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        .radio-label {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 12px; color: #374151; cursor: pointer;
+          background: #f9fafb; border: 1.5px solid #e5e7eb;
+          border-radius: 20px; padding: 5px 12px;
+          transition: all .15s; user-select: none;
+        }
+        .radio-label:hover { border-color: #2d6a4f; background: #f0fdf4; }
+        .radio-checked { background: #f0fdf4; border-color: #2d6a4f; color: #2d6a4f; font-weight: 600; }
+
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; padding-top: 16px; border-top: 1px solid #f1f3f4; }
+        .btn-cancel { padding: 8px 18px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; font-size: 13px; color: #5f6368; cursor: pointer; font-weight: 500; font-family: inherit; transition: background .15s; }
+        .btn-cancel:hover:not(:disabled) { background: #f8f9fa; }
+        .btn-save { padding: 8px 20px; border-radius: 8px; border: none; background: #2d6a4f; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background .15s; }
+        .btn-save:hover:not(:disabled) { background: #1b4332; }
+        .btn-cancel:disabled, .btn-save:disabled { opacity: .6; cursor: not-allowed; }
+
+        .gbif-search-row { display: flex; gap: 8px; }
+        .gbif-search-row .form-input { flex: 1; }
+        .gbif-hint { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+
+        .btn-gbif-search {
+          white-space: nowrap; padding: 9px 14px; background: #eff6ff;
+          border: 1px solid #bfdbfe; border-radius: 8px;
+          font-size: 12px; font-weight: 600; color: #1d4ed8;
+          cursor: pointer; font-family: inherit; transition: all .15s;
+        }
+        .btn-gbif-search:hover:not(:disabled) { background: #dbeafe; }
+        .btn-gbif-search:disabled { opacity: .5; cursor: not-allowed; }
+
+        .gbif-preview {
+          background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 10px;
+          padding: 14px; margin-bottom: 16px;
+        }
+        .gbif-preview--warn { background: #fffbeb; border-color: #fde68a; }
+        .gbif-preview-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 10px; }
+
+        .gbif-chain {
+          display: flex; flex-wrap: wrap; align-items: center;
+          gap: 4px; margin-bottom: 12px;
+        }
+        .gbif-chain-item {
+          display: flex; flex-direction: column; align-items: center;
+          background: #fff; border: 1px solid #d1fae5; border-radius: 6px;
+          padding: 4px 8px; min-width: 56px;
+        }
+        .gbif-rank  { font-size: 9px; color: #9ca3af; text-transform: capitalize; }
+        .gbif-val   { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+        .gbif-arrow { font-size: 14px; color: #9ca3af; line-height: 1; }
+
+        .btn-gbif-accept {
+          padding: 7px 16px; background: #2d6a4f; color: #fff; border: none;
+          border-radius: 7px; font-size: 12px; font-weight: 600;
+          cursor: pointer; font-family: inherit; transition: background .15s;
+        }
+        .btn-gbif-accept:hover:not(:disabled) { background: #1b4332; }
+        .btn-gbif-accept:disabled { opacity: .5; cursor: not-allowed; }
+
+        .btn-gbif-suggestion {
+          display: block; width: 100%; text-align: left; margin-bottom: 6px;
+          padding: 8px 12px; background: #fff; border: 1px solid #fde68a;
+          border-radius: 8px; font-size: 12px; cursor: pointer;
+          font-family: inherit; transition: all .15s;
+        }
+        .btn-gbif-suggestion:hover:not(:disabled) { background: #fffbeb; border-color: #f59e0b; }
+        .btn-gbif-suggestion:disabled { opacity: .5; cursor: not-allowed; }
+
+        .gbif-confirmed {
+          display: flex; align-items: center; gap: 8px; justify-content: space-between;
+          background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 8px;
+          padding: 10px 14px; margin-bottom: 16px;
+          font-size: 13px; color: #065f46; font-weight: 500;
+        }
+        .gbif-confirmed button {
+          background: none; border: none; cursor: pointer;
+          font-size: 14px; color: #9ca3af; padding: 0 4px; line-height: 1;
+        }
+        .gbif-confirmed button:hover { color: #374151; }
       `}</style>
 
       <div className="app-layout">
         <Navbar activeNav="tierliste" />
 
         <main className="main-content">
-          <button className="back-btn" onClick={() => router.back()}>← Zurück</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <button className="back-btn" onClick={() => {
+              // Kam der Nutzer über eine Sammlung hierher (siehe Sammlung.tsx), führt
+              // "Zurück" gezielt wieder in dieselbe Sammlung statt nur zur Übersicht,
+              // da /Sammlung selbst kein eigenes Routing für die Detailansicht hat.
+              const fromCollection = router.query.fromCollection;
+              if (fromCollection) {
+                router.push(`/Sammlung?collection=${fromCollection}`);
+              } else {
+                router.back();
+              }
+            }}>← Zurück</button>
+
+            {animal?.canEdit && !editing && (
+              <button className="edit-btn" onClick={() => setEditing(true)}>✏️ Bearbeiten</button>
+            )}
+          </div>
 
           {loading && <div className="status-msg">Wird geladen…</div>}
           {error   && <div className="error-box">⚠️ {error}</div>}
@@ -330,6 +948,15 @@ export default function TierDetailPage() {
 
               {/* ── Info-Spalte ── */}
               <div className="info-col">
+              {editing ? (
+                <EditAnimalForm
+                  animal={animal}
+                  clerkUserId={userId ?? null}
+                  onCancel={() => setEditing(false)}
+                  onSaved={() => { setEditing(false); loadAnimal(); }}
+                />
+              ) : (
+                <>
                 <div>
                   <div className="animal-name">{animal.name ?? `Eintrag #${animal.id}`}</div>
                   {animal.taxonomy?.name && (
@@ -371,6 +998,9 @@ export default function TierDetailPage() {
                       {animal.findingLocation && (
                         <tr><td>Fundort</td><td>{animal.findingLocation.name}</td></tr>
                       )}
+                      {animal.findingLocation && animal.findingLocation.latitude != null && animal.findingLocation.longitude != null && (
+                        <tr><td>Koordinaten</td><td>{formatCoords(animal.findingLocation.latitude, animal.findingLocation.longitude)}</td></tr>
+                      )}
                       {animal.bodyMassGram != null && (
                         <tr><td>Körpermasse</td><td>{animal.bodyMassGram} g</td></tr>
                       )}
@@ -387,11 +1017,13 @@ export default function TierDetailPage() {
                 {animal.collection && (
                   <div>
                     <div className="section-title">Sammlung</div>
-                    <a className="collection-link" href="/Sammlung">
+                    <a className="collection-link" href={`/Sammlung?collection=${animal.collection.id}`}>
                       📂 {animal.collection.name}
                     </a>
                   </div>
                 )}
+                </>
+              )}
               </div>
 
             </div>

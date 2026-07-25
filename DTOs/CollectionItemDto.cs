@@ -10,7 +10,6 @@ public class CollectionItemDto
     public string? TaxonomyName { get; set; }
     public string? TaxonomyRank { get; set; }
     public string? FindingLocation { get; set; }
-    public string? Kategorie { get; set; }
     public string? Lebensraum { get; set; }
 
     /// <summary>Id des ältesten hochgeladenen Bildes (für /api/images/{id}/content); null wenn kein Bild vorhanden.</summary>
@@ -34,4 +33,16 @@ public class CollectionItemDto
 
     /// <summary>Vereinbartes Rückgabedatum der offenen Ausleihe; nur für Eigentümer/Moderation gefüllt, sonst null.</summary>
     public DateOnly? LoanReturnDate { get; set; }
+
+    /// <summary>True, wenn der aktuelle Nutzer dieses Tier löschen darf (Admin/Moderator oder Ersteller).</summary>
+    public bool CanDelete { get; set; }
+
+    /// <summary>Nutzername des Erstellers dieses Tiers (falls beim Anlegen identifizierbar), sonst null.</summary>
+    public string? CreatedByUsername { get; set; }
+
+    /// <summary>True, wenn der aktuelle Nutzer für dieses Objekt bereits eine unbeantwortete Ausleih-Anfrage gestellt hat.</summary>
+    public bool HasPendingLoanRequest { get; set; }
+
+    /// <summary>True, wenn für dieses Objekt eine Leihe angelegt/bestätigt wurde und nun auf die Moderator/Admin-Freigabe wartet.</summary>
+    public bool IsLoanPending { get; set; }
 }

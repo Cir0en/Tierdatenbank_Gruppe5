@@ -2,8 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Net.Http.Headers;
+
+// Registriert die klassischen Windows-Codepages (u.a. 1252). Nötig, damit der CSV-Import
+// Dateien aus deutschem Excel (ANSI/Windows-1252) korrekt dekodieren kann statt Umlaute
+// als Ersatzzeichen zu verlieren. In .NET Core sind diese Codepages sonst nicht verfügbar.
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -98,6 +104,8 @@ builder.Services.AddHttpClient("Clerk", client =>
             "Bearer",
             clerkSecretKey);
 });
+
+builder.Services.AddScoped<TodoApi.Services.ClerkUserProvisioningService>();
 
 //Notification OneSignal HttpClient
 var oneSignalAppId = builder.Configuration["OneSignal:AppId"];

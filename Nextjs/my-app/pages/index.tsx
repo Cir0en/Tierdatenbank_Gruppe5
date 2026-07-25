@@ -28,15 +28,35 @@ type Specimen = {
   id: string; name: string; taxon?: string; fundort?: string;
   findDate?: string; sammlung?: string; status: "freigegeben" | "ausstehend" | "abgelehnt";
 };
-type Loan = { id: string; objekt: string; an: string; bis: string; status: "aktiv" | "überfällig" | "zurück" };
+// Nur noch für die visuellen Zustände des StatusPill (Farbgebung) genutzt.
+type Loan = { status: "aktiv" | "überfällig" | "zurück" };
 
-// Statische Platzhalterdaten für die "Aktive Leihen"-Kachel (noch nicht an
-// echte Backend-Daten angebunden, im Gegensatz zu notifLoans weiter unten).
-const MOCK_LOANS: Loan[] = [
-  { id: "LEI-001", objekt: "Papilio machaon",   an: "Dr. Müller",  bis: "2026-06-01", status: "aktiv"     },
-  { id: "LEI-002", objekt: "Carabus violaceus",  an: "Prof. Weber", bis: "2026-04-30", status: "überfällig"},
-  { id: "LEI-003", objekt: "Lacerta agilis",     an: "M. Schmidt",  bis: "2026-07-15", status: "aktiv"     },
-];
+// Vom Backend (GET /api/loan) gelieferte Leihe des eingeloggten Nutzers – sowohl
+// als Verleiher als auch als Entleiher. Statuswerte: "angefragt" | "offen" |
+// "abgelehnt" | "zurückgegeben"; "offen" entspricht einer aktiven Leihe.
+type LoanDto = {
+  id: number;
+  objectName: string | null;
+  status: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  isOverdue: boolean;
+  lenderId: number | null;
+  lenderName: string | null;
+  lenderFirstName: string | null;
+  lenderLastName: string | null;
+  borrowerId: number | null;
+  borrowerName: string | null;
+  borrowerFirstName: string | null;
+  borrowerLastName: string | null;
+};
+
+// Baut einen Anzeigenamen: "Vorname Nachname" falls vorhanden, sonst der
+// Benutzername, sonst ein neutraler Platzhalter.
+const personName = (first: string | null, last: string | null, username: string | null) => {
+  const full = [first, last].filter(Boolean).join(" ").trim();
+  return full || username || "Unbekannt";
+};
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
@@ -78,12 +98,20 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [showNotif, setShowNotif] = useState(false);
   const [pendingTax, setPendingTax] = useState(0);
+  const [pendingLoanModeration, setPendingLoanModeration] = useState(0);
   const [userRole, setUserRole] = useState("Nutzer");
-  const [notifLoans, setNotifLoans] = useState<{ endDate: string | null; isOverdue: boolean }[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [notifLoans, setNotifLoans] = useState<LoanDto[]>([]);
   const [rejectedSubs, setRejectedSubs] = useState<{ id: number; art: string; moderatorNote: string | null }[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(() => {
     try {
       const stored = localStorage.getItem("dismissed_tax_rejections");
+      return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
+    } catch { return new Set<number>(); }
+  });
+  const [dismissedLoanIds, setDismissedLoanIds] = useState<Set<number>>(() => {
+    try {
+      const stored = localStorage.getItem("dismissed_loan_rejections");
       return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
     } catch { return new Set<number>(); }
   });
@@ -165,8 +193,11 @@ export default function HomePage() {
       const me = await meRes.json();
       const role: string = me.role ?? "Nutzer";
       setUserRole(role);
+      setCurrentUserId(me.id ?? null);
 
-      // Fetch real loans for overdue/soon notifications (Bearer-Token, LoanController erfordert [Authorize])
+      // Fetch real loans for overdue/soon notifications sowie eigene offene
+      // Ausleihanfragen (als Verleiher) und abgelehnte Leihen (Bearer-Token,
+      // LoanController erfordert [Authorize])
       const loanRes = await fetch(`${API}/api/loan`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -182,12 +213,18 @@ export default function HomePage() {
         setRejectedSubs(allSubs.filter((s) => s.status === "rejected"));
       }
 
-      // Pending taxonomy submissions (Moderator / Admin only)
+      // Pending taxonomy submissions + Leihen zur Prüfung (Moderator / Admin only)
       if (role === "Moderator" || role === "Admin") {
         const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
         if (taxRes.ok) setPendingTax((await taxRes.json()).length);
+
+        const loanModRes = await fetch(`${API}/api/loan/pending-moderation`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (loanModRes.ok) setPendingLoanModeration((await loanModRes.json()).length);
       } else {
         setPendingTax(0);
+        setPendingLoanModeration(0);
       }
     } catch {}
   }, [clerkId, getToken]);
@@ -217,6 +254,15 @@ export default function HomePage() {
 
   const pending = specimens.filter((s) => s.status === "ausstehend").length;
   const overdue = notifLoans.filter((l) => l.isOverdue).length;
+  // Aktive Leihen = offene Leihen des eingeloggten Nutzers (als Ver- oder Entleiher);
+  // /api/loan liefert bereits nur die eigenen Leihen zurück.
+  const activeLoans = notifLoans.filter((l) => l.status === "offen");
+  const pendingLoanRequests = notifLoans.filter((l) => l.status === "angefragt" && l.lenderId === currentUserId).length;
+  const rejectedLoans = notifLoans.filter((l) =>
+    l.status === "abgelehnt" &&
+    (l.lenderId === currentUserId || l.borrowerId === currentUserId) &&
+    !dismissedLoanIds.has(l.id)
+  );
 
   // Markiert eine abgelehnte Taxonomie-Einreichung als "gelesen": die id wird
   // nur lokal (localStorage) gemerkt, damit sie beim nächsten Besuch nicht
@@ -227,18 +273,32 @@ export default function HomePage() {
     try { localStorage.setItem("dismissed_tax_rejections", JSON.stringify([...next])); } catch {}
   };
 
+  // Wie handleDismissRejection, nur für eigene abgelehnte Ausleihen.
+  const handleDismissLoanRejection = (id: number) => {
+    const next = new Set(dismissedLoanIds).add(id);
+    setDismissedLoanIds(next);
+    try { localStorage.setItem("dismissed_loan_rejections", JSON.stringify([...next])); } catch {}
+  };
+
   // Rollenbasierte Benachrichtigungen: baut die Liste der im Panel gezeigten
-  // Einträge aus den geladenen Daten zusammen (überfällige Leihen für alle,
-  // ausstehende Taxonomie-Freigaben nur für Moderator/Admin, eigene
-  // abgelehnte Einreichungen abzüglich bereits ausgeblendeter).
-  type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number };
+  // Einträge aus den geladenen Daten zusammen (überfällige Leihen und offene
+  // Ausleihanfragen als Verleiher für alle, ausstehende Taxonomie-Freigaben
+  // und zur Prüfung stehende Ausleihen nur für Moderator/Admin, eigene
+  // abgelehnte Einreichungen/Ausleihen abzüglich bereits ausgeblendeter).
+  type Notif = { icon: string; text: string; sub: string; href: string; urgent?: boolean; dismissId?: number; dismissKind?: "tax" | "loan" };
   const notifications: Notif[] = [];
   if (overdue > 0)
     notifications.push({ icon: "⚠", text: `${overdue} Leihe${overdue !== 1 ? "n" : ""} überfällig`, sub: "Rückgabe überschritten", href: "/leihe", urgent: true });
+  if (pendingLoanRequests > 0)
+    notifications.push({ icon: "📩", text: `${pendingLoanRequests} Ausleihanfrage${pendingLoanRequests !== 1 ? "n" : ""} offen`, sub: "Warten auf deine Bestätigung", href: "/leihe", urgent: true });
   if ((userRole === "Moderator" || userRole === "Admin") && pendingTax > 0)
     notifications.push({ icon: "🌿", text: `${pendingTax} Taxonomie-Einreichung${pendingTax !== 1 ? "en" : ""} ausstehend`, sub: "Warten auf Moderation", href: "/moderator", urgent: pendingTax >= 5 });
+  if ((userRole === "Moderator" || userRole === "Admin") && pendingLoanModeration > 0)
+    notifications.push({ icon: "⇄", text: `${pendingLoanModeration} Ausleihe${pendingLoanModeration !== 1 ? "n" : ""} zur Prüfung`, sub: "Zweite Freigabe erforderlich", href: "/moderator", urgent: pendingLoanModeration >= 5 });
   for (const s of rejectedSubs.filter((s) => !dismissedIds.has(s.id)))
-    notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id });
+    notifications.push({ icon: "❌", text: `Taxonomie „${s.art}" abgelehnt`, sub: s.moderatorNote ?? "Kein Grund angegeben", href: "/taxonomie", dismissId: s.id, dismissKind: "tax" });
+  for (const l of rejectedLoans)
+    notifications.push({ icon: "❌", text: `Ausleihe „${l.objectName ?? `Objekt #${l.id}`}" abgelehnt`, sub: "Anfrage bzw. Leihe wurde nicht freigegeben", href: "/leihe", dismissId: l.id, dismissKind: "loan" });
 
   // Client-seitige Volltextsuche über Name, Taxon und Fundort der geladenen Objekte.
   const q = search.toLowerCase();
@@ -430,13 +490,6 @@ export default function HomePage() {
         .tbl tr:last-child td { border-bottom: none; }
         .td-name { color: var(--text-hi); font-style: italic; }
         .td-id { color: var(--text-lo); font-size: 10px; }
-        .td-actions { display: flex; gap: 6px; }
-        .tbl-btn {
-          font-size: 9px; letter-spacing: 0.06em; background: none;
-          border: 1px solid var(--border); border-radius: 2px; padding: 2px 7px;
-          color: var(--text-lo); cursor: pointer; font-family: var(--ff-mono); transition: all 0.15s;
-        }
-        .tbl-btn:hover { border-color: var(--green-dim); color: var(--text-mid); }
 
         /* ── Pills ── */
         .pill {
@@ -597,7 +650,9 @@ export default function HomePage() {
                             <button
                               className="notif-dismiss"
                               title="Als gelesen markieren"
-                              onClick={() => handleDismissRejection(n.dismissId!)}
+                              onClick={() => n.dismissKind === "loan"
+                                ? handleDismissLoanRejection(n.dismissId!)
+                                : handleDismissRejection(n.dismissId!)}
                             >
                               ✓
                             </button>
@@ -655,7 +710,7 @@ export default function HomePage() {
                 <StatCard value={specimens.length} label="Objekte gesamt" sub="in allen Sammlungen" accent />
                 <StatCard value={3} label="Sammlungen" sub="aktiv" />
                 <StatCard value={pending} label="Ausstehend" sub="Taxonomie-Freigabe" />
-                <StatCard value={MOCK_LOANS.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
+                <StatCard value={activeLoans.length} label="Aktive Leihen" sub={`${overdue} überfällig`} />
                 <StatCard value={12} label="Fundorte" sub="weltweit kartiert" />
               </div>
             </div>
@@ -677,14 +732,12 @@ export default function HomePage() {
                         <th>Fundort</th>
                         <th>Datum</th>
                         <th>Status</th>
-                        {/* Aktionen-Spalte nur für eingeloggte Nutzer */}
-                        {isSignedIn && <th></th>}
                       </tr>
                     </thead>
                     <tbody>
                       {filteredSpecimens.length === 0 && (
                         <tr>
-                          <td colSpan={isSignedIn ? 6 : 5} style={{ textAlign: "center", padding: "20px 12px", color: "var(--text-lo)" }}>
+                          <td colSpan={5} style={{ textAlign: "center", padding: "20px 12px", color: "var(--text-lo)" }}>
                             Keine Objekte für „{search}" gefunden.
                           </td>
                         </tr>
@@ -700,15 +753,6 @@ export default function HomePage() {
                           <td>{s.fundort}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{formatDate(s.findDate)}</td>
                           <td><StatusPill status={s.status} /></td>
-                          {/* Edit/Karte-Buttons nur für authentifizierte Nutzer */}
-                          {isSignedIn && (
-                            <td>
-                              <div className="td-actions">
-                                <button className="tbl-btn">Edit</button>
-                                <button className="tbl-btn">Karte</button>
-                              </div>
-                            </td>
-                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -727,9 +771,10 @@ export default function HomePage() {
                   </div>
                   <div className="card">
                     <div className="action-grid">
-                      {/* "Neues Objekt" nur für eingeloggte Nutzer sichtbar */}
+                      {/* "Neues Objekt" nur für eingeloggte Nutzer sichtbar; führt zur Sammlungs-
+                          Übersicht, wo das Tier über "+ Tier hinzufügen" in einer eigenen Sammlung angelegt wird. */}
                       {isSignedIn && (
-                        <Link href="/tierliste/neu" className="action-btn">
+                        <Link href="/Sammlung" className="action-btn">
                           <span className="action-icon">＋</span>
                           <span className="action-label">Neues Objekt</span>
                           <span className="action-desc">Tier oder Insekt erfassen</span>
@@ -774,15 +819,37 @@ export default function HomePage() {
                     <Link href="/leihe" className="card-action">Alle ›</Link>
                   </div>
                   <div className="card">
-                    {MOCK_LOANS.map((loan) => (
-                      <div key={loan.id} className="loan-item">
+                    {!isSignedIn ? (
+                      <div className="loan-item">
                         <div className="loan-info">
-                          <div className="loan-name">{loan.objekt}</div>
-                          <div className="loan-meta">an {loan.an} · bis {loan.bis}</div>
+                          <div className="loan-meta">Melde dich an, um deine Leihen zu sehen.</div>
                         </div>
-                        <StatusPill status={loan.status} />
                       </div>
-                    ))}
+                    ) : activeLoans.length === 0 ? (
+                      <div className="loan-item">
+                        <div className="loan-info">
+                          <div className="loan-meta">Keine aktiven Leihen.</div>
+                        </div>
+                      </div>
+                    ) : (
+                      activeLoans.map((loan) => {
+                        // Ist der eingeloggte Nutzer der Verleiher, zeigen wir den Entleiher
+                        // ("an …"), ist er selbst der Entleiher, den Verleiher ("von …").
+                        const isLender = loan.lenderId === currentUserId;
+                        const partner = isLender
+                          ? personName(loan.borrowerFirstName, loan.borrowerLastName, loan.borrowerName)
+                          : personName(loan.lenderFirstName, loan.lenderLastName, loan.lenderName);
+                        return (
+                          <div key={loan.id} className="loan-item">
+                            <div className="loan-info">
+                              <div className="loan-name">{loan.objectName ?? `Objekt #${loan.id}`}</div>
+                              <div className="loan-meta">{isLender ? "an" : "von"} {partner} · bis {formatDate(loan.endDate ?? undefined)}</div>
+                            </div>
+                            <StatusPill status={loan.isOverdue ? "überfällig" : "aktiv"} />
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 

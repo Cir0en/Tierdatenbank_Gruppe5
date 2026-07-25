@@ -10,9 +10,12 @@ namespace TodoApi.Controllers;
 /// <summary>
 /// Verwaltet Ausleihen (Loans) von Fundobjekten zwischen Nutzern. Ein Objekt kann jeweils nur
 /// von seinem Eigentümer (über die zugehörige Collection) verliehen werden; nur der Verleiher darf
-/// eine Leihe verändern/löschen. Ausleihe- und Rückgabe-Konflikte werden sowohl auf Anwendungsebene
-/// (Statusprüfung vor dem Insert) als auch durch einen DB-seitigen Unique-Index abgesichert, um
-/// Race-Conditions bei gleichzeitigen Anfragen auszuschließen.
+/// eine Leihe verändern/löschen. Jede Leihe durchläuft zwei Freigabestufen, bevor sie aktiv wird
+/// ("offen"): zunächst der Verleiher (direkt bei CreateLoan, oder durch Bestätigung einer Anfrage
+/// über Approve), danach zwingend ein Moderator/Admin als zweite, unabhängige Instanz (Moderate-
+/// Approve/-Reject) — dieser Schritt gilt für beide Wege gleichermaßen. Ausleihe- und Rückgabe-
+/// Konflikte werden sowohl auf Anwendungsebene (Statusprüfung vor dem Insert) als auch durch einen
+/// DB-seitigen Unique-Index abgesichert, um Race-Conditions bei gleichzeitigen Anfragen auszuschließen.
 /// Erfordert eine gültige Clerk-JWT-Authentifizierung (<see cref="AuthorizeAttribute"/>); die
 /// Nutzeridentität wird ausschließlich aus dem validierten "sub"-Claim abgeleitet (siehe
 /// <see cref="GetCurrentUserAsync"/>), damit sich niemand über einen manipulierten Client-Header
@@ -106,7 +109,7 @@ public class LoanController : ControllerBase
                 i.Id,
                 i.Name,
                 CollectionName = i.Collection != null ? i.Collection.Name : null,
-                IsOnLoan = i.Loans.Any(l => l.Status == "offen")
+                IsOnLoan = i.Loans.Any(l => l.Status == "offen" || l.Status == "in_pruefung")
             })
             .OrderBy(i => i.Name)
             .ToListAsync();
@@ -159,14 +162,24 @@ public class LoanController : ControllerBase
         if (borrower.Id == currentUser.Id)
             return BadRequest(new { message = "Du kannst ein Objekt nicht an dich selbst verleihen." });
 
-        // Verfügbarkeitsprüfung: Objekt darf nicht bereits aktiv verliehen sein.
+        // Verfügbarkeitsprüfung: Objekt darf nicht bereits aktiv verliehen oder in Prüfung sein.
         // Schließt den Race-Window nicht vollständig (siehe Unique-Index unten für den harten Schutz),
         // liefert aber im Normalfall sofort eine verständliche Fehlermeldung statt einer DB-Exception.
         var alreadyLoaned = await _context.Loans
-            .AnyAsync(l => l.ObjectId == dto.ObjectId && l.Status == "offen");
+            .AnyAsync(l => l.ObjectId == dto.ObjectId && (l.Status == "offen" || l.Status == "in_pruefung"));
         if (alreadyLoaned)
-            return Conflict(new { message = "Dieses Objekt ist bereits aktiv verliehen." });
+            return Conflict(new { message = "Dieses Objekt ist bereits aktiv verliehen oder in Prüfung." });
 
+        // Der direkt angelegte Verleih überspringt die Anfrage-Warteschlange — noch offene Anfragen
+        // anderer Nutzer für dasselbe Objekt werden daher automatisch abgelehnt.
+        var otherPendingRequests = await _context.Loans
+            .Where(l => l.ObjectId == dto.ObjectId && l.Status == "angefragt")
+            .ToListAsync();
+        foreach (var other in otherPendingRequests)
+            other.Status = "abgelehnt";
+
+        // Wie bei einer bestätigten Anfrage muss auch eine direkt angelegte Leihe noch von einem
+        // Moderator/Admin als zweiter, unabhängiger Instanz freigegeben werden (siehe ModerateApprove).
         var loan = new Loan
         {
             ObjectId   = dto.ObjectId,
@@ -174,7 +187,7 @@ public class LoanController : ControllerBase
             BorrowerId = dto.BorrowerId,
             StartDate  = dto.StartDate,
             EndDate    = dto.EndDate,
-            Status     = "offen"
+            Status     = "in_pruefung"
         };
 
         _context.Loans.Add(loan);
@@ -209,6 +222,208 @@ public class LoanController : ControllerBase
         };
 
         return CreatedAtAction(nameof(GetLoan), new { id = loan.Id }, result);
+    }
+
+    // POST /api/loan/request — ein Nutzer fragt an, ein fremdes Objekt auszuleihen (Gegenstück zu
+    // CreateLoan oben, bei dem der Eigentümer die Leihe direkt anlegt). Legt status "angefragt" an;
+    // der Eigentümer muss die Anfrage über Approve/Reject unten noch bestätigen bzw. ablehnen.
+    [HttpPost("request")]
+    public async Task<ActionResult<LoanDetailDto>> CreateLoanRequest(CreateLoanRequestDto dto)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+
+        if (dto.EndDate <= dto.StartDate)
+            return BadRequest(new { message = "Das Enddatum muss nach dem Startdatum liegen." });
+
+        var obj = await _context.CollectItems
+            .Include(c => c.Collection)
+            .FirstOrDefaultAsync(c => c.Id == dto.ObjectId);
+
+        if (obj == null || obj.Collection?.UserId == null)
+            return NotFound(new { message = "Objekt nicht gefunden." });
+
+        // Nur Objekte aus öffentlichen Sammlungen dürfen angefragt werden — private Sammlungen
+        // sind für andere Nutzer ohnehin nicht sichtbar, ihre Objekt-Ids sollen daher auch hier
+        // nicht erraten/angefragt werden können.
+        if (obj.Collection.IsPublic != true)
+            return Forbid();
+
+        var ownerId = obj.Collection.UserId.Value;
+        if (ownerId == currentUser.Id)
+            return BadRequest(new { message = "Du kannst dein eigenes Objekt nicht anfragen." });
+
+        var alreadyLoaned = await _context.Loans
+            .AnyAsync(l => l.ObjectId == dto.ObjectId && (l.Status == "offen" || l.Status == "in_pruefung"));
+        if (alreadyLoaned)
+            return Conflict(new { message = "Dieses Objekt ist bereits aktiv verliehen oder in Prüfung." });
+
+        var alreadyRequested = await _context.Loans
+            .AnyAsync(l => l.ObjectId == dto.ObjectId && l.BorrowerId == currentUser.Id && l.Status == "angefragt");
+        if (alreadyRequested)
+            return Conflict(new { message = "Du hast für dieses Objekt bereits eine offene Anfrage." });
+
+        var loan = new Loan
+        {
+            ObjectId   = dto.ObjectId,
+            LenderId   = ownerId,
+            BorrowerId = currentUser.Id,
+            StartDate  = dto.StartDate,
+            EndDate    = dto.EndDate,
+            Status     = "angefragt"
+        };
+
+        _context.Loans.Add(loan);
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
+        {
+            return Conflict(new { message = "Dieses Objekt wurde soeben von einer anderen Person angefragt/verliehen." });
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23514")
+        {
+            return StatusCode(500, new { message = "Dieser Status ist in der Datenbank nicht erlaubt — wurde die Migration sql/2026-07-16_add_loan_request_status.sql bereits gegen die DB ausgeführt?" });
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var result = await ProjectLoans(_context.Loans.Where(l => l.Id == loan.Id), today).FirstAsync();
+        return CreatedAtAction(nameof(GetLoan), new { id = loan.Id }, result);
+    }
+
+    // PUT /api/loan/{id}/approve — der Verleiher bestätigt eine Ausleih-Anfrage (status "angefragt" ->
+    // "in_pruefung"). Die Leihe wird dadurch noch nicht aktiv: ein Moderator/Admin muss sie als
+    // zweite, unabhängige Instanz noch freigeben (siehe ModerateApprove/-Reject unten). Andere noch
+    // offene Anfragen für dasselbe Objekt werden dabei automatisch abgelehnt, da ein Objekt
+    // zeitgleich nur einen aktiven Leihvorgang haben kann.
+    [HttpPut("{id:int}/approve")]
+    public async Task<ActionResult<LoanDetailDto>> ApproveLoanRequest(int id)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+
+        var loan = await _context.Loans.FindAsync(id);
+        if (loan == null) return NotFound();
+
+        if (loan.LenderId != currentUser.Id)
+            return Forbid();
+
+        if (loan.Status != "angefragt")
+            return BadRequest(new { message = "Nur offene Anfragen können bestätigt werden." });
+
+        loan.Status = "in_pruefung";
+
+        var otherPending = await _context.Loans
+            .Where(l => l.ObjectId == loan.ObjectId && l.Id != loan.Id && l.Status == "angefragt")
+            .ToListAsync();
+        foreach (var other in otherPending)
+            other.Status = "abgelehnt";
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
+        {
+            return Conflict(new { message = "Dieses Objekt wurde soeben bereits an eine andere Person verliehen." });
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var result = await ProjectLoans(_context.Loans.Where(l => l.Id == id), today).FirstAsync();
+        return Ok(result);
+    }
+
+    // PUT /api/loan/{id}/reject — der Verleiher lehnt eine Ausleih-Anfrage ab (status "angefragt" ->
+    // "abgelehnt").
+    [HttpPut("{id:int}/reject")]
+    public async Task<IActionResult> RejectLoanRequest(int id)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+
+        var loan = await _context.Loans.FindAsync(id);
+        if (loan == null) return NotFound();
+
+        if (loan.LenderId != currentUser.Id)
+            return Forbid();
+
+        if (loan.Status != "angefragt")
+            return BadRequest(new { message = "Nur offene Anfragen können abgelehnt werden." });
+
+        loan.Status = "abgelehnt";
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // GET /api/loan/pending-moderation — alle Leihen, die auf die Moderator/Admin-Freigabe warten
+    // (status "in_pruefung"); zweite, vom Verleiher unabhängige Prüfinstanz vor der Aktivierung.
+    [HttpGet("pending-moderation")]
+    public async Task<ActionResult<IEnumerable<LoanDetailDto>>> GetPendingModeration()
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+        if (!IsModerator(currentUser)) return Forbid();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var loans = await ProjectLoans(_context.Loans.Where(l => l.Status == "in_pruefung"), today)
+            .OrderBy(l => l.Id)
+            .ToListAsync();
+
+        return Ok(loans);
+    }
+
+    // PUT /api/loan/{id}/moderate-approve — ein Moderator/Admin gibt eine vom Verleiher bereits
+    // bestätigte Leihe frei (status "in_pruefung" -> "offen"). Unabhängig davon, ob die Leihe direkt
+    // vom Verleiher angelegt oder aus einer Anfrage heraus bestätigt wurde.
+    [HttpPut("{id:int}/moderate-approve")]
+    public async Task<ActionResult<LoanDetailDto>> ModerateApproveLoan(int id)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+        if (!IsModerator(currentUser)) return Forbid();
+
+        var loan = await _context.Loans.FindAsync(id);
+        if (loan == null) return NotFound();
+
+        if (loan.Status != "in_pruefung")
+            return BadRequest(new { message = "Nur Leihen in Prüfung können freigegeben werden." });
+
+        loan.Status = "offen";
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
+        {
+            return Conflict(new { message = "Für dieses Objekt existiert bereits eine andere aktive Leihe." });
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var result = await ProjectLoans(_context.Loans.Where(l => l.Id == id), today).FirstAsync();
+        return Ok(result);
+    }
+
+    // PUT /api/loan/{id}/moderate-reject — ein Moderator/Admin lehnt eine zur Prüfung stehende
+    // Leihe ab (status "in_pruefung" -> "abgelehnt"), z.B. weil sie inhaltlich nicht plausibel ist.
+    [HttpPut("{id:int}/moderate-reject")]
+    public async Task<IActionResult> ModerateRejectLoan(int id)
+    {
+        var currentUser = await GetCurrentUserAsync();
+        if (currentUser == null) return Unauthorized();
+        if (!IsModerator(currentUser)) return Forbid();
+
+        var loan = await _context.Loans.FindAsync(id);
+        if (loan == null) return NotFound();
+
+        if (loan.Status != "in_pruefung")
+            return BadRequest(new { message = "Nur Leihen in Prüfung können abgelehnt werden." });
+
+        loan.Status = "abgelehnt";
+        await _context.SaveChangesAsync();
+
+        return NoContent();
     }
 
     // PUT /api/loan/{id}/return — Leihe als zurückgegeben markieren (nur Verleiher, nur aus "offen").
@@ -273,7 +488,9 @@ public class LoanController : ControllerBase
         return Ok(result);
     }
 
-    // DELETE /api/loan/{id} — Leihe löschen (nur Verleiher)
+    // DELETE /api/loan/{id} — Leihe löschen. Der Verleiher darf jede eigene Leihe löschen; der
+    // Entleiher darf zusätzlich eine eigene, noch unbestätigte Anfrage (status "angefragt")
+    // zurückziehen, ohne auf eine Reaktion des Verleihers warten zu müssen.
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteLoan(int id)
     {
@@ -283,7 +500,9 @@ public class LoanController : ControllerBase
         var loan = await _context.Loans.FindAsync(id);
         if (loan == null) return NotFound();
 
-        if (loan.LenderId != currentUser.Id)
+        var isLender = loan.LenderId == currentUser.Id;
+        var isOwnPendingRequest = loan.BorrowerId == currentUser.Id && loan.Status == "angefragt";
+        if (!isLender && !isOwnPendingRequest)
             return Forbid();
 
         _context.Loans.Remove(loan);
@@ -305,4 +524,6 @@ public class LoanController : ControllerBase
             return null;
         return await _context.Users.FirstOrDefaultAsync(u => u.ClerkId == clerkId);
     }
+
+    private static bool IsModerator(User user) => user.Role == "Admin" || user.Role == "Moderator";
 }

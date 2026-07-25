@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Models;
 using TodoApi.DTOs;
+using TodoApi.Services;
 using Microsoft.AspNetCore.Authorization;
 
 namespace TodoApi.Controllers
@@ -18,10 +19,12 @@ namespace TodoApi.Controllers
     public class CollectionController : ControllerBase
     {
         private readonly NeondbContext _context;
+        private readonly ClerkUserProvisioningService _userProvisioning;
 
-        public CollectionController(NeondbContext context)
+        public CollectionController(NeondbContext context, ClerkUserProvisioningService userProvisioning)
         {
             _context = context;
+            _userProvisioning = userProvisioning;
         }
 
         // GET /api/collections — listet alle für den aktuellen Nutzer sichtbaren Sammlungen:
@@ -33,6 +36,9 @@ namespace TodoApi.Controllers
             var currentUser = await GetCurrentUserAsync();
 
             var canModerate = currentUser != null && CanModerateCollections(currentUser);
+            // Bearbeiten (Tiere hinzufügen/ändern in dieser Sammlung) dürfen nur der Eigentümer oder ein
+            // Admin — Moderatoren ausdrücklich NICHT in fremden Sammlungen (nur ihre eigenen).
+            var isAdmin = currentUser != null && currentUser.Role == "Admin";
 
             var collections = await _context.Collections
                 .Where(c =>
@@ -49,7 +55,7 @@ namespace TodoApi.Controllers
                     OwnerUsername = c.User != null ? c.User.Username : null,
 
                     IsOwner = currentUser != null && c.UserId == currentUser.Id,
-                    CanEdit = currentUser != null && (canModerate || c.UserId == currentUser.Id),
+                    CanEdit = currentUser != null && (isAdmin || c.UserId == currentUser.Id),
                     CanDelete = currentUser != null && (canModerate || c.UserId == currentUser.Id)
                 })
                 .ToListAsync();
@@ -68,6 +74,9 @@ namespace TodoApi.Controllers
         {
             var currentUser = await GetCurrentUserAsync();
             var canModerate = currentUser != null && CanModerateCollections(currentUser);
+            // Bearbeiten (Tiere hinzufügen/ändern) nur für Eigentümer oder Admin — Moderatoren
+            // dürfen fremde Sammlungen ausdrücklich NICHT bearbeiten (nur ihre eigenen).
+            var isAdmin = currentUser != null && currentUser.Role == "Admin";
 
             var collection = await _context.Collections
                 .Where(c => c.Id == id)
@@ -84,7 +93,7 @@ namespace TodoApi.Controllers
                     OwnerUsername = c.User != null ? c.User.Username : null,
 
                     IsOwner = currentUser != null && c.UserId == currentUser.Id,
-                    CanEdit = currentUser != null && (canModerate || c.UserId == currentUser.Id),
+                    CanEdit = currentUser != null && (isAdmin || c.UserId == currentUser.Id),
                     CanDelete = currentUser != null && (canModerate || c.UserId == currentUser.Id),
 
                     Items = c.CollectItems.Select(item => new CollectionItemDto
@@ -93,7 +102,6 @@ namespace TodoApi.Controllers
                         Name = item.Name,
                         FindDate = item.FindDate,
                         Status = item.Status,
-                        Kategorie = item.Kategorie,
                         Lebensraum = item.Lebensraum,
                         TaxonomyName = item.Taxonomy != null ? item.Taxonomy.Name : null,
                         TaxonomyRank = item.Taxonomy != null ? item.Taxonomy.Rank : null,
@@ -136,6 +144,17 @@ namespace TodoApi.Controllers
                         LoanReturnDate = (currentUser != null && (c.UserId == currentUser.Id || canModerate))
                             ? item.Loans.Where(l => l.Status == "offen").Select(l => l.EndDate).FirstOrDefault()
                             : null,
+
+                        // Löschrecht für ein einzelnes Tier: Admin/Moderator oder der Nutzer, der es angelegt hat
+                        // (siehe AnimalsController.DeleteAnimal) — bewusst unabhängig vom Sammlungs-Eigentümer.
+                        CanDelete = currentUser != null && (canModerate || item.CreatedByUserId == currentUser.Id),
+                        CreatedByUsername = item.CreatedByUser != null ? item.CreatedByUser.Username : null,
+                        HasPendingLoanRequest = currentUser != null &&
+                            item.Loans.Any(l => l.Status == "angefragt" && l.BorrowerId == currentUser.Id),
+                        // Ein direkt angelegter Verleih oder eine vom Verleiher bestätigte Anfrage
+                        // wartet noch auf die zweite Freigabestufe durch Moderator/Admin (siehe
+                        // LoanController) — das Objekt ist in dieser Zeit bereits reserviert.
+                        IsLoanPending = item.Loans.Any(l => l.Status == "in_pruefung"),
                     }).ToList()
                 })
                 .FirstOrDefaultAsync();
@@ -276,8 +295,15 @@ namespace TodoApi.Controllers
             if (string.IsNullOrWhiteSpace(clerkId))
                 return null;
 
-            return await _context.Users
+            var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.ClerkId == clerkId);
+            if (user != null)
+                return user;
+
+            // Normalerweise legt der Clerk-Webhook (ClerkWebhookController) den Nutzer bei der
+            // Registrierung an; ist der Webhook nicht erreichbar (z.B. lokale Entwicklung ohne
+            // gültigen Tunnel), fehlt der Nutzer hier sonst dauerhaft. Fallback: direkt bei Clerk nachschlagen.
+            return await _userProvisioning.ProvisionFromClerkAsync(clerkId);
         }
 
         // Bearbeitungsrecht: Eigentümer der Sammlung oder ein Nutzer mit Moderationsrechten (Admin/Moderator)

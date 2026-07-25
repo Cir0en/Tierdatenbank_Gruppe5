@@ -220,6 +220,15 @@ namespace TodoApi.Controllers
             var clerkId = Request.Headers["X-Clerk-User-Id"].FirstOrDefault();
             var isAuthenticated = !string.IsNullOrWhiteSpace(clerkId);
 
+            User? currentUser = null;
+            if (isAuthenticated)
+            {
+                currentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.ClerkId == clerkId && u.DeletedAt == null);
+            }
+            var canModerate = currentUser != null && (currentUser.Role == "Admin" || currentUser.Role == "Moderator");
+            var currentUserId = currentUser?.Id;
+
             var query = _context.CollectItems
                 .AsNoTracking()
                 .Where(i =>
@@ -227,12 +236,18 @@ namespace TodoApi.Controllers
                     i.FindingLocation.Latitude != null &&
                     i.FindingLocation.Longitude != null);
 
-            // Nicht eingeloggte Nutzer sehen nur Einträge ohne Sammlung oder aus öffentlichen Sammlungen
-            if (!isAuthenticated)
+            // Sichtbarkeit auf der Karte (Marker, Such-Liste und Heatmap nutzen alle diese Quelle):
+            // Einträge ohne Sammlung und aus ÖFFENTLICHEN Sammlungen sind für alle sichtbar.
+            // Einträge aus PRIVATEN Sammlungen dagegen nur für deren Eigentümer — sowie (analog zur
+            // Sammlungs-Sichtbarkeit im CollectionController) für Moderatoren/Admins. Der Filter gilt
+            // jetzt IMMER, nicht mehr nur für anonyme Anfragen (vorher sahen eingeloggte Nutzer
+            // fälschlich auch fremde private Einträge).
+            if (!canModerate)
             {
                 query = query.Where(i =>
                     i.CollectionId == null ||
-                    i.Collection!.IsPublic == true);
+                    i.Collection!.IsPublic == true ||
+                    (currentUserId != null && i.Collection!.UserId == currentUserId));
             }
 
             if (west.HasValue && south.HasValue && east.HasValue && north.HasValue)
@@ -261,7 +276,9 @@ namespace TodoApi.Controllers
                     TaxonomyId = i.TaxonomyId,
                     TaxonomyName = i.Taxonomy != null ? i.Taxonomy.Name : null,
 
-                    Status = i.Status
+                    Status = i.Status,
+
+                    CanDelete = currentUser != null && (canModerate || i.CreatedByUserId == currentUser.Id)
                 })
                 .ToListAsync();
 

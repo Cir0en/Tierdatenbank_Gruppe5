@@ -63,6 +63,89 @@ function initials(u: UserEntry) {
   return u.username.slice(0, 2).toUpperCase();
 }
 
+// Karte zum Anlegen eines neuen Nutzerkontos (nur Admin). Legt das Konto über
+// POST /api/users an (Clerk + lokale Spiegelung, Rolle "Nutzer") und lädt danach
+// die Nutzerliste neu (onCreated), damit der neue Eintrag sofort erscheint.
+function CreateAccountCard({ apiFetch, onCreated }: {
+  apiFetch: (path: string, options?: RequestInit) => Promise<Response>;
+  onCreated: () => void;
+}) {
+  const [email, setEmail]         = useState('');
+  const [password, setPassword]   = useState('');
+  const [username, setUsername]   = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName]   = useState('');
+  const [creating, setCreating]   = useState(false);
+  const [err, setErr]             = useState<string | null>(null);
+  const [ok, setOk]               = useState<string | null>(null);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) { setErr('E-Mail und Passwort sind erforderlich.'); return; }
+    setCreating(true);
+    setErr(null);
+    setOk(null);
+    try {
+      const res = await apiFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          username: username.trim() || null,
+          firstName: firstName.trim() || null,
+          lastName: lastName.trim() || null,
+        }),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      const created = await res.json();
+      setOk(`Konto „${created.username}" wurde angelegt.`);
+      setEmail(''); setPassword(''); setUsername(''); setFirstName(''); setLastName('');
+      onCreated();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <form className="card ca-card" onSubmit={handleCreate}>
+      <div className="card-head">
+        <span className="card-title">➕ Konto anlegen</span>
+      </div>
+      {err && <div className="ca-err">{err}</div>}
+      {ok  && <div className="ca-ok">✓ {ok}</div>}
+      <div className="ca-grid">
+        <label className="ca-field">
+          <span className="ca-label">E-Mail <span className="ca-req">*</span></span>
+          <input className="ca-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@beispiel.de" />
+        </label>
+        <label className="ca-field">
+          <span className="ca-label">Passwort <span className="ca-req">*</span></span>
+          <input className="ca-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="mind. 8 Zeichen" />
+        </label>
+        <label className="ca-field">
+          <span className="ca-label">Benutzername</span>
+          <input className="ca-input" type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="optional" />
+        </label>
+        <label className="ca-field">
+          <span className="ca-label">Vorname</span>
+          <input className="ca-input" type="text" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="optional" />
+        </label>
+        <label className="ca-field">
+          <span className="ca-label">Nachname</span>
+          <input className="ca-input" type="text" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="optional" />
+        </label>
+      </div>
+      <div className="ca-actions">
+        <button className="ca-submit" type="submit" disabled={creating}>
+          {creating ? '⏳ Wird angelegt…' : '➕ Konto anlegen'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // Hauptkomponente der Admin-Seite: regelt Rollen-/Zugriffsschutz, lädt
 // Nutzerliste und Statistiken, und bietet Aktionen zum Ändern von Rollen,
 // Sperren/Entsperren und Löschen von Nutzern.
@@ -389,6 +472,29 @@ export default function AdminPage() {
         .rb--user     { background: #f3f4f6; color: #374151; }
         .rb--inactive { background: #fef3c7; color: #92400e; }
 
+        /* Konto anlegen */
+        .ca-card { margin-bottom: 20px; flex-shrink: 0; }
+        .ca-err { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+        .ca-ok  { font-size: 12px; color: #065f46; background: #f0fdf4; border: 1px solid #a7f3d0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+        .ca-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .ca-field { display: flex; flex-direction: column; gap: 5px; }
+        .ca-label { font-size: 11px; font-weight: 600; color: #5f6368; text-transform: uppercase; letter-spacing: .05em; }
+        .ca-req { color: #dc2626; }
+        .ca-input {
+          padding: 8px 11px; border: 1px solid #e5e7eb; border-radius: 7px;
+          font-size: 13px; font-family: inherit; color: #111827; background: #fff;
+          outline: none; transition: border-color .15s, box-shadow .15s;
+        }
+        .ca-input:focus { border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,.1); }
+        .ca-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+        .ca-submit {
+          padding: 8px 18px; border-radius: 7px; border: none;
+          background: #059669; color: #fff; font-size: 13px; font-weight: 600;
+          cursor: pointer; font-family: inherit; transition: background .15s;
+        }
+        .ca-submit:hover:not(:disabled) { background: #047857; }
+        .ca-submit:disabled { opacity: .6; cursor: not-allowed; }
+
         /* Role select */
         .role-select {
           padding: 5px 8px; border-radius: 6px; border: 1px solid #e5e7eb;
@@ -495,6 +601,9 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+
+            {/* Konto anlegen (nur Admin) */}
+            <CreateAccountCard apiFetch={apiFetch} onCreated={fetchData} />
 
             <div className="two-col">
               {/* User management table */}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@clerk/nextjs';
 import Navbar from '../components/Navbar';
 
@@ -56,7 +57,9 @@ interface GbifTaxonomy {
 }
 
 interface GbifSuggestion {
+  source?: 'gbif' | 'local';
   usageKey?: number;
+  taxonomyId?: number;
   scientificName?: string;
   canonicalName?: string;
   phylum?: string;
@@ -69,7 +72,9 @@ interface GbifSuggestion {
 
 interface GbifPreviewResult {
   status: 'match_found' | 'needs_confirmation';
-  UsageKey?: number;
+  source?: 'gbif' | 'local';
+  usageKey?: number;
+  taxonomyId?: number;
   confidence?: number;
   scientificName?: string;
   canonicalName?: string;
@@ -230,6 +235,29 @@ function CreateModal({ onClose, onSuccess }: {
     }
   };
 
+  // Ein lokaler Treffer/Vorschlag existiert bereits als freigegebener Taxonomie-Eintrag —
+  // anders als bei einem GBIF-Treffer muss hier nichts angelegt werden, der Baum wird nur
+  // neu geladen, damit der Nutzer den bereits vorhandenen Eintrag sieht.
+  const handleLocalSelect = () => {
+    onSuccess(true);
+  };
+
+  const acceptSuggestion = (s: GbifSuggestion) => {
+    if (s.source === 'local') {
+      handleLocalSelect();
+    } else if (s.usageKey) {
+      handleGbifConfirm(s.usageKey);
+    }
+  };
+
+  const acceptMatch = () => {
+    if (gbifResult?.source === 'local') {
+      handleLocalSelect();
+    } else if (gbifResult?.usageKey) {
+      handleGbifConfirm(gbifResult.usageKey);
+    }
+  };
+
   // Reicht eine manuell erfasste Taxonomie als Vorschlag ein (Bearer-Token-
   // Auth, da die Einreichung dem einreichenden Nutzer zugeordnet werden
   // muss). Der Eintrag ist erst nach Moderator-Freigabe sichtbar, daher wird
@@ -312,9 +340,11 @@ function CreateModal({ onClose, onSuccess }: {
 
         {step === 'gbif_confirm' && gbifResult?.taxonomy && (
           <>
-            <div className="modal-title">✅ Vorgeschlagene Taxonomie übernehmen?</div>
+            <div className="modal-title">
+              {gbifResult.source === 'local' ? '📋 Bereits in der Datenbank vorhanden' : '✅ Vorgeschlagene Taxonomie übernehmen?'}
+            </div>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-              GBIF-Übereinstimmung für <em>„{speciesName}"</em>
+              {gbifResult.source === 'local' ? 'Lokaler Treffer' : 'GBIF-Übereinstimmung'} für <em>„{speciesName}"</em>
               {gbifResult.confidence != null && (
                 <span style={{ marginLeft: 8, background: '#d1fae5', color: '#065f46', padding: '1px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600 }}>
                   {gbifResult.confidence}% Konfidenz
@@ -327,7 +357,7 @@ function CreateModal({ onClose, onSuccess }: {
             {error && <div className="modal-error">{error}</div>}
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => { setError(null); setStep('manual'); }}>Manuell eintragen</button>
-              <button className="btn-save" onClick={() => gbifResult.UsageKey && handleGbifConfirm(gbifResult.UsageKey)} disabled={saving}>
+              <button className="btn-save" onClick={acceptMatch} disabled={saving}>
                 {saving ? '⏳ Wird übernommen…' : '✅ Taxonomie übernehmen'}
               </button>
             </div>
@@ -342,7 +372,7 @@ function CreateModal({ onClose, onSuccess }: {
             </div>
             {gbifResult?.suggestions && gbifResult.suggestions.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16, maxHeight: 300, overflowY: 'auto' }}>
-                {gbifResult.suggestions.filter(s => s.usageKey).map(s => {
+                {gbifResult.suggestions.filter(s => s.usageKey || s.taxonomyId).map(s => {
                   const tax: GbifTaxonomy = {
                     stamm: s.phylum, klasse: s.className, ordnung: s.order,
                     familie: s.family, gattung: s.genus,
@@ -350,9 +380,9 @@ function CreateModal({ onClose, onSuccess }: {
                   };
                   return (
                     <button
-                      key={s.usageKey}
+                      key={s.taxonomyId ?? s.usageKey}
                       disabled={saving}
-                      onClick={() => handleGbifConfirm(s.usageKey!)}
+                      onClick={() => acceptSuggestion(s)}
                       style={{
                         background: '#fff', border: '1.5px solid #e5e7eb', borderRadius: 8,
                         padding: '10px 14px', textAlign: 'left', cursor: 'pointer',
@@ -363,6 +393,7 @@ function CreateModal({ onClose, onSuccess }: {
                     >
                       <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', fontStyle: 'italic', marginBottom: 4 }}>
                         {s.canonicalName ?? s.scientificName}
+                        {s.source === 'local' && <span style={{ fontStyle: 'normal', fontWeight: 500, color: '#9ca3af', marginLeft: 6 }}>· lokal</span>}
                       </div>
                       <TaxChain tax={tax} />
                     </button>
@@ -610,6 +641,14 @@ export default function TaxonomiePage() {
           flex-shrink: 0;
         }
         .btn-add-entry:hover { background: #1b4332; }
+        .add-entry-hint {
+          display: flex; align-items: center; gap: 7px; white-space: nowrap;
+          padding: 9px 16px; background: #f8f9fa; color: #6b7280;
+          border: 1px dashed #d1d5db; border-radius: 8px; font-size: 12px;
+          flex-shrink: 0;
+        }
+        .add-entry-hint a { color: #2d6a4f; font-weight: 600; text-decoration: none; }
+        .add-entry-hint a:hover { text-decoration: underline; }
 
         /* ── Breadcrumb ── */
         .breadcrumb {
@@ -778,10 +817,18 @@ export default function TaxonomiePage() {
               <h1 className="page-title">🌿 Taxonomie</h1>
               <p className="page-sub">Hierarchische Klassifizierung der erfassten Arten</p>
             </div>
-            {!showAnimals && isSignedIn && (
-              <button className="btn-add-entry" onClick={() => setShowCreateModal(true)}>
-                + Neuer Eintrag
-              </button>
+            {!showAnimals && (
+              isSignedIn ? (
+                <button className="btn-add-entry" onClick={() => setShowCreateModal(true)}>
+                  + Neuer Eintrag
+                </button>
+              ) : (
+                // Nicht eingeloggte Besucher können keine Taxonomien anlegen — statt den Button
+                // kommentarlos zu verstecken, erklären, warum, und direkt zum Login verlinken.
+                <span className="add-entry-hint">
+                  🔒 <Link href="/login">Anmelden</Link>, um neue Einträge hinzuzufügen
+                </span>
+              )
             )}
           </div>
 

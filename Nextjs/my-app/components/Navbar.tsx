@@ -5,14 +5,14 @@
 //  - Ein-/Ausklappen der Sidebar
 //  - Anzeige von Nutzername/Rolle bzw. Login-Link, falls nicht angemeldet
 //  - Laden und periodisches Aktualisieren einer Benachrichtigungszahl
-//    (überfällige Ausleihen + zu prüfende/abgelehnte Taxonomie-Einreichungen)
+//    (überfällige/angefragte/abgelehnte Ausleihen + zu prüfende/abgelehnte
+//    Taxonomie-Einreichungen + zur Prüfung stehende Ausleihen für Moderation)
 "use client";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useUser, useAuth } from "@clerk/nextjs";
-import { useLanguage } from "../contexts/LanguageContext";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
@@ -37,21 +37,25 @@ type Props = {
 export default function Navbar({ activeNav: activeProp }: Props) {
   const router = useRouter();
   const { user, isLoaded } = useUser();
-  const { isSignedIn, getToken } = useAuth();
-  const { t } = useLanguage();
+  const { isSignedIn, getToken, signOut } = useAuth();
   const [open, setOpen] = useState(true);
   const [dbRole, setDbRole] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
 
   // Rolle + Benachrichtigungszahl holen und alle 30 s aktualisieren.
   // Die Benachrichtigungszahl (notifCount, angezeigt als Badge am Dashboard-Link)
-  // setzt sich aus drei Quellen zusammen:
+  // setzt sich zusammen aus:
   //   1. eigene überfällige Ausleihen
-  //   2. offene Taxonomie-Einreichungen, die auf Prüfung warten (nur für
+  //   2. offene Ausleih-Anfragen, bei denen der Nutzer Verleiher ist (muss bestätigen/ablehnen)
+  //   3. eigene abgelehnte Ausleihen (als Verleiher oder Entleiher), noch nicht "gesehen"
+  //   4. offene Taxonomie-Einreichungen, die auf Prüfung warten (nur für
   //      Moderator/Admin sichtbar, da nur diese Rollen sie bearbeiten dürfen)
-  //   3. eigene abgelehnte Taxonomie-Einreichungen, die der Nutzer noch nicht
-  //      "gesehen"/verworfen hat (Abgleich gegen eine in localStorage gepflegte
-  //      Liste bereits quittierter Ablehnungs-IDs)
+  //   5. Ausleihen, die als zweite Instanz auf Moderator/Admin-Freigabe warten
+  //      (status "in_pruefung", nur für Moderator/Admin sichtbar)
+  //   6. eigene abgelehnte Taxonomie-Einreichungen, die der Nutzer noch nicht
+  //      "gesehen"/verworfen hat
+  // "Noch nicht gesehen" wird für 3. und 6. jeweils gegen eine eigene, in localStorage
+  // gepflegte Liste bereits quittierter Ablehnungs-IDs abgeglichen.
   // Ein Intervall sorgt dafür, dass die Zahl auch ohne Neuladen der Seite
   // regelmäßig aktuell bleibt.
   useEffect(() => {
@@ -68,6 +72,13 @@ export default function Navbar({ activeNav: activeProp }: Props) {
         const meRes = await fetch(`${API}/api/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        // Wurde der Nutzer inzwischen gesperrt (oder gelöscht), antwortet die
+        // UserStatusMiddleware mit 403 — dann den Nutzer sofort ausloggen und zum
+        // Login schicken, statt ihn mit dauerhaft fehlschlagenden Aufrufen "eingeloggt" zu lassen.
+        if (meRes.status === 403) {
+          if (!cancelled) { await signOut(); router.replace('/login'); }
+          return;
+        }
         if (!meRes.ok || cancelled) return;
         const me = await meRes.json();
         const role: string = me.role ?? "Nutzer";
@@ -75,21 +86,44 @@ export default function Navbar({ activeNav: activeProp }: Props) {
 
         let count = 0;
 
-        // Überfällige Leihen (Bearer-Token, LoanController erfordert [Authorize])
+        // Überfällige Leihen + offene Ausleih-Anfragen, bei denen der Nutzer der
+        // Verleiher ist und somit bestätigen/ablehnen muss, + eigene abgelehnte
+        // Leihen (als Verleiher oder Entleiher, ohne bereits gelesene) (Bearer-Token,
+        // LoanController erfordert [Authorize])
         const loanRes = await fetch(`${API}/api/loan`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (loanRes.ok && !cancelled) {
-          const loans: { isOverdue: boolean }[] = await loanRes.json();
+          const loans: { id: number; isOverdue: boolean; status: string | null; lenderId: number | null; borrowerId: number | null }[] = await loanRes.json();
           count += loans.filter((l) => l.isOverdue).length;
+          count += loans.filter((l) => l.status === "angefragt" && l.lenderId === me.id).length;
+
+          let dismissedLoans = new Set<number>();
+          try {
+            const stored = localStorage.getItem("dismissed_loan_rejections");
+            if (stored) dismissedLoans = new Set<number>(JSON.parse(stored));
+          } catch {}
+          count += loans.filter((l) =>
+            l.status === "abgelehnt" &&
+            (l.lenderId === me.id || l.borrowerId === me.id) &&
+            !dismissedLoans.has(l.id)
+          ).length;
         }
 
-        // Ausstehende Taxonomie-Einreichungen (Moderator / Admin)
+        // Ausstehende Taxonomie-Einreichungen + Leihen zur Prüfung (Moderator / Admin)
         if (role === "Moderator" || role === "Admin") {
           const taxRes = await fetch(`${API}/api/taxonomy/submissions/pending`);
           if (taxRes.ok && !cancelled) {
             const subs: unknown[] = await taxRes.json();
             count += subs.length;
+          }
+
+          const loanModRes = await fetch(`${API}/api/loan/pending-moderation`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (loanModRes.ok && !cancelled) {
+            const pending: unknown[] = await loanModRes.json();
+            count += pending.length;
           }
         }
 
@@ -116,7 +150,7 @@ export default function Navbar({ activeNav: activeProp }: Props) {
     refresh();
     const interval = setInterval(refresh, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [isLoaded, isSignedIn, getToken, user?.id]);
+  }, [isLoaded, isSignedIn, getToken, user?.id, signOut, router]);
 
   // Aktiver Nav-Punkt: entweder explizit von der Seite über die `activeNav`-Prop
   // vorgegeben, oder anhand des aktuellen Next.js-Routen-Pfads ermittelt
@@ -341,18 +375,7 @@ export default function Navbar({ activeNav: activeProp }: Props) {
                 )}
               </span>
               {open && (
-                <span className="nb-nav-label">
-                  {({
-                    index:     t.nav.dashboard,
-                    tierliste: t.nav.collections,
-                    karte:     t.nav.map,
-                    leihe:     t.nav.loans,
-                    taxonomie: t.nav.taxonomy,
-                    export:    t.nav.settings,
-                    moderator: t.nav.moderation,
-                    admin:     t.nav.admin,
-                  } as Record<string, string>)[item.id] ?? item.label}
-                </span>
+                <span className="nb-nav-label">{item.label}</span>
               )}
               {open && item.id === "index" && notifCount > 0 && (
                 <span className="nb-badge">{notifCount > 99 ? "99+" : notifCount}</span>

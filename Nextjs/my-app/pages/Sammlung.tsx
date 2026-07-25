@@ -41,7 +41,6 @@ interface CollectionItem {
   taxonomyName: string | null;
   taxonomyRank: string | null;
   findingLocation: string | null;
-  kategorie: string | null;
   lebensraum: string | null;
   imageUrl: string | null;
   imageCreatedAt: string | null;
@@ -53,6 +52,10 @@ interface CollectionItem {
   isOnLoan: boolean;
   loanedToUsername: string | null;
   loanReturnDate: string | null;
+  canDelete: boolean;
+  createdByUsername: string | null;
+  hasPendingLoanRequest: boolean;
+  isLoanPending: boolean;
 }
 
 interface BorrowedItem {
@@ -69,7 +72,6 @@ interface BorrowedItem {
 }
 
 const SELTENHEIT_OPTIONS = ['Häufig', 'Selten', 'Sehr selten', 'Ungefährdet', 'Wichtig', 'Geschützt', 'Stark gefährdet'];
-const KATEGORIE_OPTIONS  = ['Insekten', 'Säugetiere', 'Vögel', 'Amphibien', 'Reptilien', 'Fische', 'Spinnentiere', 'Schnecken', 'Sonstige'];
 
 interface CollectionDetail extends Collection {
   items: CollectionItem[];
@@ -90,6 +92,82 @@ function statusBadge(status: string | null) {
     case 'stark gefährdet': return { bg: '#fce7f3', color: '#9d174d' };
     default:             return { bg: '#f3f4f6', color: '#374151' };
   }
+}
+
+interface ReverseGeocodeResult {
+  locationName: string;
+  distanceMeters: number | null;
+  isPrecise: boolean;
+}
+
+function distanceMeters(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const earthRadius = 6371000;
+  const toRad = (v: number) => v * Math.PI / 180;
+
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) *
+    Math.cos(toRad(bLat)) *
+    Math.sin(dLng / 2) *
+    Math.sin(dLng / 2);
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+async function reverseGeocode(lng: number, lat: number): Promise<ReverseGeocodeResult> {
+  const key = process.env.NEXT_PUBLIC_MAP_API_KEY;
+  const roundedLng = lng.toFixed(6);
+  const roundedLat = lat.toFixed(6);
+  const url =
+    `https://api.maptiler.com/geocoding/${roundedLng},${roundedLat}.json` +
+    `?key=${key}&language=de`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('MapTiler Reverse Geocoding Fehler:', res.status, errorText);
+    throw new Error('Adresse konnte nicht ermittelt werden');
+  }
+
+  const data = await res.json();
+  const features = data.features ?? [];
+
+  if (features.length === 0) {
+    return {
+      locationName: `Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+      distanceMeters: null,
+      isPrecise: false,
+    };
+  }
+
+  const best = features[0];
+  const [foundLng, foundLat] = best.center ?? [lng, lat];
+  const distance = distanceMeters(lng, lat, foundLng, foundLat);
+
+  const placeName =
+    best.place_name_de ??
+    best.place_name ??
+    best.text_de ??
+    best.text ??
+    'unbekannter Ort';
+
+  if (distance <= 100) {
+    return { locationName: placeName, distanceMeters: distance, isPrecise: true };
+  }
+
+  if (distance <= 500) {
+    return { locationName: `In der Nähe von ${placeName}`, distanceMeters: distance, isPrecise: false };
+  }
+
+  const shortPlace = best.text_de ?? best.text ?? placeName;
+  return {
+    locationName: `Naturstandort bei ${shortPlace} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+    distanceMeters: distance,
+    isPrecise: false,
+  };
 }
 
 // ── Create Modal ───────────────────────────────────────────────────────────────
@@ -370,6 +448,89 @@ function LoanAnimalModal({ item, getToken, onClose, onSaved }: {
   );
 }
 
+// Modal zum Anfragen eines fremden Sammlungs-Eintrags (Tiers): der anfragende
+// Nutzer schlägt einen Zeitraum vor, der Eigentümer muss die Anfrage danach
+// über /leihe bestätigen oder ablehnen (siehe LoanController.ApproveLoanRequest).
+function RequestLoanModal({ item, getToken, onClose, onSaved }: {
+  item: CollectionItem;
+  getToken: () => Promise<string | null>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [startDate, setStart] = useState(today);
+  const [endDate, setEnd]     = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!startDate || !endDate) { setError('Bitte alle Felder ausfüllen.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/loan/request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ objectId: item.id, startDate, endDate }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message ?? `Fehler ${res.status}`);
+      }
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={saving ? undefined : onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">📩 Ausleihe anfragen</div>
+
+        <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '10px 14px', marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{item.name ?? `Eintrag #${item.id}`}</div>
+          {item.taxonomyName && <div style={{ fontSize: 11, color: '#6b7280', fontStyle: 'italic', marginTop: 2 }}>{item.taxonomyName}</div>}
+        </div>
+
+        <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+          Die Eigentümerin/der Eigentümer der Sammlung muss deine Anfrage noch bestätigen, bevor die Ausleihe aktiv wird.
+        </p>
+
+        {error && <div className="modal-error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-row-2">
+            <div className="form-group">
+              <label className="form-label">Startdatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={startDate}
+                onChange={e => setStart(e.target.value)} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Rückgabedatum <span className="required">*</span></label>
+              <input type="date" className="form-input" value={endDate}
+                min={startDate} onChange={e => setEnd(e.target.value)} required />
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="btn-cancel" disabled={saving} onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn-save" disabled={saving}>
+              {saving ? '⏳ Wird gesendet…' : '📩 Anfrage senden'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── GBIF Types ─────────────────────────────────────────────────────────────────
 // Typen für die Antwort der GBIF-Taxonomie-Suche (Global Biodiversity
 // Information Facility): entweder ein eindeutiger Treffer (match_found) oder
@@ -381,19 +542,24 @@ interface GbifTaxonomy {
 }
 interface GbifMatchResult {
   status: 'match_found';
-  usageKey: number;
-  confidence: number;
+  source?: 'gbif' | 'local';
+  usageKey?: number;
+  taxonomyId?: number;
+  confidence?: number;
   canonicalName: string;
   taxonomy: GbifTaxonomy;
 }
 interface GbifSuggestion {
+  source?: 'gbif' | 'local';
   usageKey?: number;
+  taxonomyId?: number;
   scientificName?: string;
   canonicalName?: string;
   rank?: string;
 }
 interface GbifNeedsConfirmation {
   status: 'needs_confirmation';
+  message?: string;
   suggestions: GbifSuggestion[];
 }
 type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
@@ -404,8 +570,9 @@ type GbifResult = GbifMatchResult | GbifNeedsConfirmation;
 // zusätzlich den GBIF-Workflow: der Nutzer gibt einen Artnamen ein, sucht
 // gegen die GBIF-Datenbank und übernimmt (bestätigt) einen Treffer, wodurch
 // eine taxonomyId für das Tier gesetzt wird.
-function AddAnimalModal({ collectionId, onClose, onSaved }: {
+function AddAnimalModal({ collectionId, clerkUserId, onClose, onSaved }: {
   collectionId: number;
+  clerkUserId: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -418,8 +585,13 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
   const [bodyMass, setBodyMass]     = useState('');
   const [bodyLen, setBodyLen]       = useState('');
   const [taxonomyId, setTaxonomyId] = useState<number | null>(null);
-  const [kategorie, setKategorie]   = useState('');
   const [lebensraum, setLebensraum] = useState('');
+  const [showCoords, setShowCoords] = useState(false);
+  const [latitude, setLatitude]     = useState('');
+  const [longitude, setLongitude]   = useState('');
+  const [locationName, setLocationName] = useState('');
+  const [locationNameTouched, setLocationNameTouched] = useState(false);
+  const [locationLookupLoading, setLocationLookupLoading] = useState(false);
   const [seltenheit, setSeltenheit] = useState('');
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState<string | null>(null);
@@ -468,7 +640,10 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usageKey }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
       const data = await res.json();
       setTaxonomyId(data.taxonomyId);
       setConfirmedName(displayName);
@@ -480,17 +655,73 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
     }
   };
 
+  // Übernimmt einen lokalen Treffer/Vorschlag direkt: der Taxonomie-Eintrag existiert
+  // bereits in der Datenbank (manuell eingereicht und freigegeben), daher ist anders als
+  // bei GBIF-Treffern kein Bestätigungs-Request nötig.
+  const selectLocalTaxonomy = (id: number, displayName: string) => {
+    setTaxonomyId(id);
+    setConfirmedName(displayName);
+    setGbifResult(null);
+  };
+
+  useEffect(() => {
+    if (!showCoords || locationNameTouched) return;
+
+    const lat = latitude.trim() ? parseFloat(latitude) : null;
+    const lng = longitude.trim() ? parseFloat(longitude) : null;
+    if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setLocationLookupLoading(true);
+      try {
+        const result = await reverseGeocode(lng, lat);
+        if (!cancelled) setLocationName(result.locationName);
+      } catch (err) {
+        console.error('Reverse Geocoding fehlgeschlagen:', err);
+        if (!cancelled) setLocationName(`Naturstandort (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+      } finally {
+        if (!cancelled) setLocationLookupLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [showCoords, latitude, longitude, locationNameTouched]);
+
   // Speichert das neue Tier mit allen Formularfeldern (inkl. optionaler
   // taxonomyId aus dem GBIF-Workflow) im Backend. Leere/„Unbekannt"-Werte
   // werden bewusst als null statt als leerer String übergeben.
   const handleSave = async () => {
     if (!displayName.trim()) { setError('Bitte einen Namen eingeben.'); return; }
+
+    const lat = showCoords && latitude.trim()  ? parseFloat(latitude)  : null;
+    const lng = showCoords && longitude.trim() ? parseFloat(longitude) : null;
+    if (showCoords && ((lat === null) !== (lng === null))) {
+      setError('Bitte Breiten- und Längengrad zusammen eingeben (oder beide leer lassen).');
+      return;
+    }
+    if (lat !== null && (isNaN(lat) || lat < -90 || lat > 90)) {
+      setError('Breitengrad muss zwischen -90 und 90 liegen.');
+      return;
+    }
+    if (lng !== null && (isNaN(lng) || lng < -180 || lng > 180)) {
+      setError('Längengrad muss zwischen -180 und 180 liegen.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`${API}/api/animals`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {}),
+        },
         body: JSON.stringify({
           name:         displayName.trim(),
           description:  description.trim() || null,
@@ -500,9 +731,11 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
           bodyMassGram: bodyMass ? parseFloat(bodyMass) : null,
           bodyLengthMm: bodyLen  ? parseFloat(bodyLen)  : null,
           taxonomyId:   taxonomyId,
-          kategorie:    kategorie || null,
           lebensraum:   lebensraum.trim() || null,
           status:       seltenheit || null,
+          latitude:     lat,
+          longitude:    lng,
+          locationName:  locationName.trim() || null,
           collectionId,
         }),
       });
@@ -530,6 +763,19 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
             placeholder="z. B. Fund Nr. 3, Waldrand-Käfer"
             value={displayName}
             onChange={e => setDisplayName(e.target.value)} />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Fundort</label>
+          <input type="text" className="form-input"
+            placeholder="z. B. Buchenwald oberhalb der Siegquelle"
+            value={locationName}
+            onChange={e => { setLocationName(e.target.value); setLocationNameTouched(true); }} />
+          <div className="gbif-hint">
+            {locationLookupLoading
+              ? 'Fundort wird aus den Koordinaten ermittelt...'
+              : 'Wird bei Koordinaten automatisch vorgeschlagen und kann angepasst werden.'}
+          </div>
         </div>
 
         {/* Artname + GBIF-Suche (nur für die Taxonomie-Zuordnung, unabhängig vom Namen oben) */}
@@ -560,11 +806,13 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
           </div>
         )}
 
-        {/* GBIF Treffer */}
+        {/* GBIF/lokaler Treffer */}
         {matchResult && (
           <div className="gbif-preview">
             <div className="gbif-preview-title">
-              GBIF-Treffer — {matchResult.confidence}% Übereinstimmung
+              {matchResult.source === 'local'
+                ? 'Bereits in der Datenbank vorhanden'
+                : `GBIF-Treffer — ${matchResult.confidence}% Übereinstimmung`}
             </div>
             <div className="gbif-chain">
               {(Object.entries(matchResult.taxonomy) as [string, string][]).map(([rank, val], i, arr) => (
@@ -578,29 +826,34 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
               ))}
             </div>
             <button type="button" className="btn-gbif-accept" disabled={confirming}
-              onClick={() => handleGbifConfirm(matchResult.usageKey, matchResult.canonicalName)}>
+              onClick={() => matchResult.source === 'local' && matchResult.taxonomyId
+                ? selectLocalTaxonomy(matchResult.taxonomyId, matchResult.canonicalName)
+                : handleGbifConfirm(matchResult.usageKey!, matchResult.canonicalName)}>
               {confirming ? '⏳ Wird gespeichert…' : '✓ Taxonomie übernehmen'}
             </button>
           </div>
         )}
 
-        {/* GBIF Vorschläge */}
+        {/* GBIF/lokale Vorschläge */}
         {needsConfirm && (
           <div className="gbif-preview gbif-preview--warn">
             <div className="gbif-preview-title">Keine exakte Übereinstimmung gefunden</div>
-            {needsConfirm.suggestions.filter(s => s.usageKey).length > 0 ? (
+            {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).length > 0 ? (
               <>
                 <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>Meintest du eine dieser Arten?</div>
-                {needsConfirm.suggestions.filter(s => s.usageKey).map((s, i) => (
+                {needsConfirm.suggestions.filter(s => s.usageKey || s.taxonomyId).map((s, i) => (
                   <button key={i} type="button" className="btn-gbif-suggestion" disabled={confirming}
-                    onClick={() => handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
+                    onClick={() => s.source === 'local' && s.taxonomyId
+                      ? selectLocalTaxonomy(s.taxonomyId, s.canonicalName ?? s.scientificName ?? 'Unbekannt')
+                      : handleGbifConfirm(s.usageKey!, s.canonicalName ?? s.scientificName ?? 'Unbekannt')}>
                     <em>{s.canonicalName ?? s.scientificName}</em>
                     {s.rank && <span className="gbif-rank"> [{s.rank}]</span>}
+                    {s.source === 'local' && <span className="gbif-rank"> · lokal</span>}
                   </button>
                 ))}
               </>
             ) : (
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>Keine Vorschläge gefunden.</div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>{needsConfirm.message ?? 'Keine Vorschläge gefunden.'}</div>
             )}
           </div>
         )}
@@ -611,21 +864,12 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
             value={description} onChange={e => setDesc(e.target.value)} />
         </div>
 
-        <div className="form-row-2">
-          <div className="form-group">
-            <label className="form-label">Tier-Kategorie</label>
-            <select className="form-select" value={kategorie} onChange={e => setKategorie(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {KATEGORIE_OPTIONS.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Seltenheit</label>
-            <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
-              <option value="">— nicht angegeben —</option>
-              {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+        <div className="form-group">
+          <label className="form-label">Seltenheit</label>
+          <select className="form-select" value={seltenheit} onChange={e => setSeltenheit(e.target.value)}>
+            <option value="">— nicht angegeben —</option>
+            {SELTENHEIT_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
 
         <div className="form-row-2">
@@ -640,6 +884,31 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
             <input type="date" className="form-input"
               value={findDate} onChange={e => setFindDate(e.target.value)} />
           </div>
+        </div>
+
+        <div className="form-group">
+          <label className="checkbox-label">
+            <input type="checkbox" checked={showCoords}
+              onChange={e => setShowCoords(e.target.checked)} />
+            Koordinaten manuell eingeben (statt über die Kartenansicht)
+          </label>
+          {showCoords && (
+            <div className="form-row-2" style={{ marginTop: 10 }}>
+              <div className="form-group">
+                <label className="form-label">Breitengrad</label>
+                <input type="number" step="any" min="-90" max="90" className="form-input"
+                  placeholder="z. B. 50.9411"
+                  value={latitude} onChange={e => setLatitude(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Längengrad</label>
+                <input type="number" step="any" min="-180" max="180" className="form-input"
+                  placeholder="z. B. 8.0020"
+                  value={longitude} onChange={e => setLongitude(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <div className="gbif-hint">Wird ein Fundort mit Koordinaten angegeben, erscheint das Tier zusätzlich auf der Kartenansicht.</div>
         </div>
 
         <div className="form-group">
@@ -660,7 +929,7 @@ function AddAnimalModal({ collectionId, onClose, onSaved }: {
             <label className="form-label">Altersklasse</label>
             <select className="form-select" value={ageClass} onChange={e => setAgeClass(e.target.value)}>
               <option value="">— nicht angegeben —</option>
-              <option value="Juvenile">Juvenil</option>
+              <option value="Juvenil">Juvenil</option>
               <option value="Subadult">Subadult</option>
               <option value="Adult">Adult</option>
               <option value="Senior">Senior</option>
@@ -706,7 +975,29 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
   const router = useRouter();
   const [showAddModal, setShowAddModal]     = useState(false);
   const [loanItem, setLoanItem]             = useState<CollectionItem | null>(null);
+  const [requestItem, setRequestItem]       = useState<CollectionItem | null>(null);
   const [loanSuccess, setLoanSuccess]       = useState<string | null>(null);
+  const [deletingId, setDeletingId]         = useState<number | null>(null);
+
+  // Löscht ein einzelnes Tier aus der Sammlung nach Bestätigungsdialog. Nur für
+  // Admin/Moderator oder den Ersteller des Eintrags sichtbar (item.canDelete, siehe Backend).
+  const handleDeleteAnimal = async (e: React.MouseEvent, item: CollectionItem) => {
+    e.stopPropagation();
+    if (!confirm(`„${item.name ?? `Eintrag #${item.id}`}" wirklich löschen?`)) return;
+    setDeletingId(item.id);
+    try {
+      const res = await fetch(`${API}/api/animals/${item.id}`, {
+        method: 'DELETE',
+        headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+      onAnimalAdded();
+    } catch (err: any) {
+      alert(err.message ?? 'Löschen fehlgeschlagen.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div>
@@ -716,7 +1007,9 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
         <div className="detail-header-info">
           <div className="detail-title-row">
             <div className="detail-title">{detail.name}</div>
-            {isSignedIn && (
+            {/* Tiere hinzufügen darf nur der Eigentümer der Sammlung oder ein Admin (detail.canEdit,
+                siehe CollectionController) — nicht in fremden (auch nicht öffentlichen) Sammlungen. */}
+            {isSignedIn && detail.canEdit && (
               <button className="btn-add-animal" onClick={() => setShowAddModal(true)}>
                 + Tier hinzufügen
               </button>
@@ -754,7 +1047,13 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           {detail.items.map(item => {
             const badge = statusBadge(item.status);
             return (
-              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}`)}>
+              <div key={item.id} className="animal-card" onClick={() => router.push(`/tier/${item.id}?fromCollection=${detail.id}`)}>
+                {item.canDelete && (
+                  <button className="animal-delete-btn" disabled={deletingId === item.id}
+                    onClick={e => handleDeleteAnimal(e, item)} title="Tier löschen">
+                    {deletingId === item.id ? '…' : '🗑'}
+                  </button>
+                )}
                 {/* Foto */}
                 <div className="animal-card-img-wrap">
                   {item.imageUrl ? (
@@ -781,10 +1080,8 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                   )}
 
                   <div className="animal-card-meta">
-                    {(item.kategorie || item.taxonomyRank) && (
-                      <span className="animal-card-cat">
-                        {item.kategorie ?? item.taxonomyRank}
-                      </span>
+                    {item.taxonomyRank && (
+                      <span className="animal-card-cat">{item.taxonomyRank}</span>
                     )}
                     {item.lebensraum && (
                       <span className="animal-card-cat">{item.lebensraum}</span>
@@ -793,6 +1090,10 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                       <span className="animal-card-loc">📍 {item.findingLocation}</span>
                     )}
                   </div>
+
+                  {item.createdByUsername && (
+                    <div className="animal-card-creator">👤 {item.createdByUsername}</div>
+                  )}
 
                   {item.status && (
                     <span className="animal-card-badge"
@@ -814,6 +1115,10 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                       <div className="btn-loan-animal btn-loan-animal--disabled" title="Dieses Tier ist bereits verliehen">
                         Bereits verliehen
                       </div>
+                    ) : item.isLoanPending ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Wartet auf Freigabe durch Moderation">
+                        🕓 Wird geprüft
+                      </div>
                     ) : (
                       <button
                         className="btn-loan-animal"
@@ -821,6 +1126,29 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
                         title="Dieses Tier ausleihen"
                       >
                         ⇄ Ausleihen
+                      </button>
+                    )
+                  )}
+
+                  {/* Nicht-Eigentümer können eine Ausleihe anfragen statt sie selbst anzulegen —
+                      Bestätigung durch den Eigentümer und anschließend durch die Moderation erfolgt
+                      unter /leihe bzw. /moderator. */}
+                  {!detail.isOwner && clerkUserId && (
+                    item.isOnLoan ? null : item.isLoanPending ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Wartet auf Freigabe durch Moderation">
+                        🕓 Wird geprüft
+                      </div>
+                    ) : item.hasPendingLoanRequest ? (
+                      <div className="btn-loan-animal btn-loan-animal--disabled" title="Warten auf Bestätigung durch die Eigentümerin/den Eigentümer">
+                        📩 Anfrage gesendet
+                      </div>
+                    ) : (
+                      <button
+                        className="btn-loan-animal"
+                        onClick={e => { e.stopPropagation(); setRequestItem(item); setLoanSuccess(null); }}
+                        title="Ausleihe für dieses Tier anfragen"
+                      >
+                        📩 Ausleihe anfragen
                       </button>
                     )
                   )}
@@ -834,6 +1162,7 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
       {showAddModal && (
         <AddAnimalModal
           collectionId={detail.id}
+          clerkUserId={clerkUserId}
           onClose={() => setShowAddModal(false)}
           onSaved={() => { setShowAddModal(false); onAnimalAdded(); }}
         />
@@ -846,8 +1175,21 @@ function CollectionDetailView({ detail, onBack, onAnimalAdded, isSignedIn, clerk
           onClose={() => setLoanItem(null)}
           onSaved={() => {
             setLoanItem(null);
-            setLoanSuccess(`„${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde erfolgreich ausgeliehen.`);
-            onAnimalAdded(); // lädt die Sammlung neu, damit der "Verliehen"-Badge sofort sichtbar wird
+            setLoanSuccess(`Ausleihe für „${loanItem.name ?? `Eintrag #${loanItem.id}`}" wurde angelegt und wartet auf Freigabe durch die Moderation.`);
+            onAnimalAdded(); // lädt die Sammlung neu, damit der "Wird geprüft"-Status sofort sichtbar wird
+          }}
+        />
+      )}
+
+      {requestItem && clerkUserId && (
+        <RequestLoanModal
+          item={requestItem}
+          getToken={getToken}
+          onClose={() => setRequestItem(null)}
+          onSaved={() => {
+            setRequestItem(null);
+            setLoanSuccess(`Anfrage für „${requestItem.name ?? `Eintrag #${requestItem.id}`}" wurde gesendet.`);
+            onAnimalAdded(); // lädt die Sammlung neu, damit "Anfrage gesendet" sofort sichtbar wird
           }}
         />
       )}
@@ -863,8 +1205,11 @@ type Tab = 'public' | 'mine' | 'borrowed';
 // Hauptkomponente der Seite /Sammlung. Verwaltet sowohl die Grid-Übersicht
 // (mit Tabs "Öffentlich" / "Meine Sammlungen" und Volltextsuche über den Namen)
 // als auch die Detailansicht (siehe CollectionDetailView), zwischen denen über
-// den lokalen `detail`-State umgeschaltet wird (kein eigenes Routing/URL-Wechsel).
+// den lokalen `detail`-State umgeschaltet wird. Die geöffnete Sammlung wird per
+// ?collection=<id> in der URL gespiegelt (shallow routing), damit ein Zurück-
+// navigieren von der Tier-Detailseite wieder dieselbe Sammlung öffnet.
 export default function SammlungPage() {
+  const router = useRouter();
   const { user } = useUser();
   const { isSignedIn, getToken } = useAuth();
   // clerkUserId wird bei jeder Sammlungs-/Objekt-API-Anfrage als
@@ -955,10 +1300,16 @@ export default function SammlungPage() {
   useEffect(() => { load(); }, [load]);
 
   // Lädt die Detaildaten (inkl. aller enthaltenen Tier-Einträge) einer
-  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um.
+  // Sammlung nach und schaltet die Ansicht auf die Detailansicht um. Spiegelt
+  // die geöffnete Sammlung zusätzlich per Query-Parameter in der URL, damit ein
+  // Zurücknavigieren (z.B. von der Tier-Detailseite) wieder in derselben
+  // Sammlung landet statt in der Übersicht (siehe onBack unten).
   const openCollection = async (id: number) => {
     setDetailLoading(true);
     setDetail(null);
+    if (router.query.collection !== String(id)) {
+      router.push({ pathname: '/Sammlung', query: { collection: id } }, undefined, { shallow: true });
+    }
     try {
       const res = await fetch(`${API}/api/collections/${id}`, {
         headers: clerkUserId ? { 'X-Clerk-User-Id': clerkUserId } : {},
@@ -971,6 +1322,22 @@ export default function SammlungPage() {
       setDetailLoading(false);
     }
   };
+
+  // Öffnet beim (Wieder-)Laden der Seite automatisch die Sammlung aus dem
+  // Query-Parameter, z.B. nach dem Zurücknavigieren von /tier/[id]. Verschwindet
+  // der Query-Parameter wieder (z.B. beim Klick auf den Navbar-Link "/Sammlung",
+  // während man in der Detailansicht ist), wird die Detailansicht geschlossen,
+  // damit man tatsächlich zur Übersicht zurückkehrt.
+  useEffect(() => {
+    if (!router.isReady) return;
+    const collectionId = parseInt(router.query.collection as string, 10);
+    if (isNaN(collectionId)) {
+      if (detail) setDetail(null);
+    } else if (detail?.id !== collectionId) {
+      openCollection(collectionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.collection]);
 
   // Callback nach erfolgreichem Anlegen einer Sammlung: Modal schließen und
   // Liste neu laden, damit die neue Sammlung sofort sichtbar ist.
@@ -1070,12 +1437,15 @@ export default function SammlungPage() {
         .col-meta-item { font-size: 11px; color: #9ca3af; }
 
         .col-delete-btn {
-          position: absolute; top: 10px; right: 10px;
-          background: none; border: none; cursor: pointer; font-size: 15px;
-          opacity: 0; transition: opacity .15s; padding: 2px 4px; border-radius: 4px;
+          position: absolute; top: 10px; right: 10px; z-index: 1;
+          display: flex; align-items: center; justify-content: center;
+          width: 28px; height: 28px;
+          background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 8px;
+          color: #b91c1c; cursor: pointer; font-size: 14px;
+          transition: background .15s, border-color .15s, transform .15s;
         }
-        .col-card:hover .col-delete-btn { opacity: 1; }
-        .col-delete-btn:hover { background: #fee2e2; }
+        .col-delete-btn:hover { background: #fecaca; border-color: #f87171; transform: scale(1.06); }
+        .col-delete-btn:disabled { opacity: .6; cursor: not-allowed; }
 
         /* ── Detail view ── */
         .detail-header {
@@ -1150,6 +1520,12 @@ export default function SammlungPage() {
         }
         .form-select:focus { border-color: #2d6a4f; box-shadow: 0 0 0 3px rgba(45,106,79,.1); }
 
+        .checkbox-label {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 13px; color: #374151; cursor: pointer; user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2d6a4f; }
+
         .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
         .radio-label {
           display: flex; align-items: center; gap: 6px;
@@ -1201,9 +1577,21 @@ export default function SammlungPage() {
         .animal-card {
           border-radius: 14px; border: 1px solid #e5e7eb; background: #fff;
           overflow: hidden; transition: box-shadow .2s, transform .2s;
-          display: flex; flex-direction: column;
+          display: flex; flex-direction: column; position: relative; cursor: pointer;
         }
         .animal-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.1); transform: translateY(-3px); }
+
+        .animal-delete-btn {
+          position: absolute; top: 8px; right: 8px; z-index: 1;
+          display: flex; align-items: center; justify-content: center;
+          width: 30px; height: 30px;
+          background: #fee2e2; border: 1.5px solid #fca5a5; border-radius: 8px;
+          color: #b91c1c; cursor: pointer; font-size: 14px;
+          box-shadow: 0 1px 4px rgba(0,0,0,.12);
+          transition: background .15s, border-color .15s, transform .15s;
+        }
+        .animal-delete-btn:hover { background: #fecaca; border-color: #f87171; transform: scale(1.06); }
+        .animal-delete-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
 
         .animal-card-img-wrap {
           width: 100%; height: 180px; cursor: pointer; overflow: hidden;
@@ -1228,6 +1616,7 @@ export default function SammlungPage() {
         .animal-card-meta { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
         .animal-card-cat  { font-size: 12px; color: #6b7280; }
         .animal-card-loc  { font-size: 12px; color: #6b7280; }
+        .animal-card-creator { font-size: 12px; color: #6b7280; margin-top: 2px; }
         .animal-card-badge {
           display: inline-block; margin-top: 8px; align-self: flex-start;
           font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px;
@@ -1313,7 +1702,10 @@ export default function SammlungPage() {
               </div>
               <CollectionDetailView
                 detail={detail}
-                onBack={() => setDetail(null)}
+                onBack={() => {
+                  setDetail(null);
+                  router.push('/Sammlung', undefined, { shallow: true });
+                }}
                 onAnimalAdded={() => openCollection(detail.id)}
                 isSignedIn={isSignedIn ?? false}
                 clerkUserId={clerkUserId}
